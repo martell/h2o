@@ -26,7 +26,12 @@ pthread_mutex_t cloexec_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int set_cloexec(int fd)
 {
+#ifdef _WIN32
+    u_long nonblock = 1;
+    return ioctlsocket(fd, FIONBIO, &nonblock) != -1 ? 0 : -1;
+#else
     return fcntl(fd, F_SETFD, FD_CLOEXEC) != -1 ? 0 : -1;
+#endif
 }
 
 int cloexec_accept(int socket, struct sockaddr *addr, socklen_t *addrlen)
@@ -51,6 +56,7 @@ Exit:
 #endif
 }
 
+#ifndef _WIN32
 int cloexec_pipe(int fds[2])
 {
 #ifdef __linux__
@@ -70,6 +76,7 @@ Exit:
     return ret;
 #endif
 }
+#endif
 
 int cloexec_socket(int domain, int type, int protocol)
 {
