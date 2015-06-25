@@ -24,6 +24,20 @@
  *   picotemplate.pl --conf=misc/picotemplate-conf.pl lib/file/_templates.c.h
  */
 
+#ifdef _WIN32
+static inline
+int readdir_r (DIR *dirp, struct dirent *entry, struct dirent **result)
+{
+   errno = 0;
+   entry = readdir (dirp);
+   *result = entry;
+   if (entry == NULL && errno != 0) {
+       return -1;
+   }
+   return 0;
+}
+#endif
+
 static h2o_buffer_t *build_dir_listing_html(h2o_mem_pool_t *pool, h2o_iovec_t path_normalized, DIR *dp)
 {
     h2o_buffer_t *_;
