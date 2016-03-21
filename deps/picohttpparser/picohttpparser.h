@@ -28,7 +28,7 @@
 #define picohttpparser_h
 
 #include <sys/types.h>
-
+#define ssize_t int
 /* $Id$ */
 
 #ifdef __cplusplus

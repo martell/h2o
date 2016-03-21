@@ -3,13 +3,7 @@ use warnings;
 use Test::More;
 use t::Util;
 
-my $CURL_CMD = q{curl --silent --show-error --output /dev/null --write-out '%{content_type}'};
-
-plan skip_all => 'curl not found'
-    unless prog_exists('curl');
-
-subtest "basic" => sub {
-    my $server = spawn_h2o(<< 'EOT');
+my $server = spawn_h2o(<< 'EOT');
 hosts:
   default:
     paths:
@@ -38,37 +32,26 @@ file.index:
   - index.xhtml
 EOT
 
-    my $port = $server->{port};
-    my %expected = (
-        '/'             => 'application/xml',
-        '/addtypes/'    => 'application/xhtml+xml',
-        '/removetypes/' => 'application/octet-stream',
-        '/settypes/'    => 'text/xml',
-    );
+plan skip_all => 'curl not found'
+    unless prog_exists('curl');
 
-    for my $path (sort keys %expected) {
-        my $ct = `$CURL_CMD http://127.0.0.1:$port$path`;
-        is $ct, $expected{$path}, "$path";
-        $ct = `$CURL_CMD http://127.0.0.1:$port${path}index.xhtml`;
-        is $ct, $expected{$path}, "${path}index.xhtml";
-    }
+my $CURL_CMD = q{curl --silent --show-error --output /dev/null --write-out '%{content_type}'};
+my $port = $server->{port};
+my %expected = (
+    '/'             => 'application/xml',
+    '/addtypes/'    => 'application/xhtml+xml',
+    '/removetypes/' => 'application/octet-stream',
+    '/settypes/'    => 'text/xml',
+);
 
-    my $ct = `$CURL_CMD --header 'host: default-type-test' http://127.0.0.1:$port/`;
-    is $ct, 'application/xhtml+xml', 'setdefaulttype';
-};
+for my $path (sort keys %expected) {
+    my $ct = `$CURL_CMD http://127.0.0.1:$port$path`;
+    is $ct, $expected{$path}, "$path";
+    $ct = `$CURL_CMD http://127.0.0.1:$port${path}index.xhtml`;
+    is $ct, $expected{$path}, "${path}index.xhtml";
+}
 
-subtest "issue730" => sub {
-    my $server = spawn_h2o(<< 'EOT');
-hosts:
-  default:
-    paths:
-      /:
-        file.dir: t/assets/doc_root
-file.mime.addtypes:
-  "text/plain; charset=mycharset": ".txt"
-EOT
-    my $ct = `$CURL_CMD http://127.0.0.1:$server->{port}/index.txt`;
-    is $ct, "text/plain; charset=mycharset";
-};
+my $ct = `$CURL_CMD --header 'host: default-type-test' http://127.0.0.1:$port/`;
+is $ct, 'application/xhtml+xml', 'setdefaulttype';
 
 done_testing;

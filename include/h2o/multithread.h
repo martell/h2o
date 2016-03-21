@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015 DeNA Co., Ltd., Kazuho Oku, Tatsuhiko Kubo
+ * Copyright (c) 2015 DeNA Co., Ltd., Kazuho Oku
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -22,7 +22,7 @@
 #ifndef h2o__multithread_h
 #define h2o__multithread_h
 
-#include <pthread.h>
+#include "uv.h"
 #include "h2o/linklist.h"
 #include "h2o/socket.h"
 
@@ -68,7 +68,7 @@ void h2o_multithread_register_receiver(h2o_multithread_queue_t *queue, h2o_multi
  */
 void h2o_multithread_unregister_receiver(h2o_multithread_queue_t *queue, h2o_multithread_receiver_t *receiver);
 /**
- * sends a message (or set message to NULL to just wake up the receiving thread)
+ * sends a message
  */
 void h2o_multithread_send_message(h2o_multithread_receiver_t *receiver, h2o_multithread_message_t *message);
 /**
@@ -78,6 +78,6 @@ void h2o_multithread_send_request(h2o_multithread_receiver_t *receiver, h2o_mult
 /**
  * create a thread
  */
-void h2o_multithread_create_thread(pthread_t *tid, const pthread_attr_t *attr, void *(*func)(void *), void *arg);
+void h2o_multithread_create_thread(uv_thread_t *tid, void *(*func)(void *), void *arg);
 
 #endif

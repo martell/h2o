@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2016 DeNA Co., Ltd., Kazuho Oku
+ * Copyright (c) 2014 DeNA Co., Ltd.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -19,24 +19,62 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#include <netinet/in.h>
-#include <netinet/tcp.h>
+
 #include <stdlib.h>
-#include <sys/socket.h>
-#include <sys/uio.h>
-#include <unistd.h>
 #include "cloexec.h"
 #include "h2o/linklist.h"
 
-#if !defined(H2O_USE_ACCEPT4)
-#ifdef __linux__
-#define H2O_USE_ACCEPT4 1
-#elif __FreeBSD__ >= 10
-#define H2O_USE_ACCEPT4 1
-#else
-#define H2O_USE_ACCEPT4 0
+#ifdef _WIN32
+
+struct iovec {
+   char *buf;
+   unsigned long len;
+};
+
+
+static ssize_t writev(SOCKET fd, const struct iovec *iov, int iovcnt) {
+    DWORD sent = 0;
+    h2o_iovec_t* psend = (h2o_iovec_t*) iov;
+    LPWSABUF pbuf = _alloca(sizeof(WSABUF) * iovcnt);
+    int i;
+    for (i = 0; i < iovcnt; ++i) {
+        pbuf[i].len = psend[i].len;
+        pbuf[i].buf = psend[i].base;
+        sent += pbuf[i].len;
+    }
+    if (WSASend(fd, pbuf, iovcnt, NULL, 0, NULL, NULL) == 0)
+        return (ssize_t) sent;
+    return -1;
+}
+
+# undef  socket_error
+# undef  read_socket
+# undef  close_socket
+# undef  EINTR
+# define EINTR        WSAEINTR
+# undef  EWOULDBLOCK
+# define EWOULDBLOCK  WSAEWOULDBLOCK
+# undef  EAGAIN
+# define EAGAIN       WSAEWOULDBLOCK
+# undef  EINPROGRESS
+# define EINPROGRESS  WSAEINPROGRESS
+
+# define socket_error WSAGetLastError()
+# define read_socket(f, d, s) recv(f, d, s, 0)
+# define close_socket(f) closesocket(f)
+
+#elif __GNUC__
+# define socket_error errno
+# define read_socket(f, d, s) read(fd, d, s)
+# define close_socket(f) close(f)
+
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
+#include <sys/uio.h>
+#include <unistd.h>
 #endif
-#endif
+
 
 struct st_h2o_evloop_socket_t {
     h2o_socket_t super;
@@ -53,6 +91,13 @@ struct st_h2o_evloop_socket_t {
     } _wreq;
     struct st_h2o_evloop_socket_t *_next_pending;
     struct st_h2o_evloop_socket_t *_next_statechanged;
+    struct {
+        union {
+            struct sockaddr addr;
+            struct sockaddr_storage ss;
+        };
+        socklen_t len;
+    } peername;
 };
 
 static void link_to_pending(struct st_h2o_evloop_socket_t *sock);
@@ -67,7 +112,7 @@ static void evloop_do_on_socket_create(struct st_h2o_evloop_socket_t *sock);
 static void evloop_do_on_socket_close(struct st_h2o_evloop_socket_t *sock);
 static void evloop_do_on_socket_export(struct st_h2o_evloop_socket_t *sock);
 
-#if H2O_USE_POLL || H2O_USE_EPOLL || H2O_USE_KQUEUE
+#if H2O_USE_SELECT || H2O_USE_EPOLL || H2O_USE_KQUEUE
 /* explicitly specified */
 #else
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
@@ -75,12 +120,12 @@ static void evloop_do_on_socket_export(struct st_h2o_evloop_socket_t *sock);
 #elif defined(__linux)
 #define H2O_USE_EPOLL 1
 #else
-#define H2O_USE_POLL 1
+#define H2O_USE_SELECT 1
 #endif
 #endif
 
-#if H2O_USE_POLL
-#include "evloop/poll.c.h"
+#if H2O_USE_SELECT
+#include "evloop/select.c.h"
 #elif H2O_USE_EPOLL
 #include "evloop/epoll.c.h"
 #elif H2O_USE_KQUEUE
@@ -92,11 +137,8 @@ static void evloop_do_on_socket_export(struct st_h2o_evloop_socket_t *sock);
 void link_to_pending(struct st_h2o_evloop_socket_t *sock)
 {
     if (sock->_next_pending == sock) {
-        struct st_h2o_evloop_socket_t **slot = (sock->_flags & H2O_SOCKET_FLAG_IS_ACCEPTED_CONNECTION) != 0
-                                                   ? &sock->loop->_pending_as_server
-                                                   : &sock->loop->_pending_as_client;
-        sock->_next_pending = *slot;
-        *slot = sock;
+        sock->_next_pending = sock->loop->_pending;
+        sock->loop->_pending = sock;
     }
 }
 
@@ -120,10 +162,10 @@ static int on_read_core(int fd, h2o_buffer_t **input)
             /* memory allocation failed */
             return -1;
         }
-        while ((rret = read(fd, buf.base, buf.len <= INT_MAX / 2 ? buf.len : INT_MAX / 2 + 1)) == -1 && errno == EINTR)
+        while ((rret = read_socket(fd, buf.base, buf.len)) == -1 && socket_error == EINTR)
             ;
         if (rret == -1) {
-            if (errno == EAGAIN)
+            if (socket_error == EAGAIN)
                 break;
             else
                 return -1;
@@ -162,10 +204,10 @@ static int write_core(int fd, h2o_iovec_t **bufs, size_t *bufcnt)
             iovcnt = IOV_MAX;
             if (*bufcnt < iovcnt)
                 iovcnt = (int)*bufcnt;
-            while ((wret = writev(fd, (struct iovec *)*bufs, iovcnt)) == -1 && errno == EINTR)
+            while ((wret = writev(fd, (struct iovec *)*bufs, iovcnt)) == -1 && socket_error == EINTR)
                 ;
             if (wret == -1) {
-                if (errno != EAGAIN)
+                if (socket_error != EAGAIN)
                     return -1;
                 break;
             }
@@ -249,7 +291,7 @@ void do_dispose_socket(h2o_socket_t *_sock)
     evloop_do_on_socket_close(sock);
     wreq_free_buffer_if_allocated(sock);
     if (sock->fd != -1) {
-        close(sock->fd);
+        close_socket(sock->fd);
         sock->fd = -1;
     }
     sock->_flags = H2O_SOCKET_FLAG_IS_DISPOSED;
@@ -265,7 +307,7 @@ void do_write(h2o_socket_t *_sock, h2o_iovec_t *_bufs, size_t bufcnt, h2o_socket
     assert(sock->_wreq.cnt == 0);
     sock->super._cb.write = cb;
 
-    bufs = alloca(sizeof(*bufs) * bufcnt);
+    bufs = _alloca(sizeof(*bufs) * bufcnt);
     memcpy(bufs, _bufs, sizeof(*bufs) * bufcnt);
 
     /* try to write now */
@@ -325,7 +367,17 @@ int do_export(h2o_socket_t *_sock, h2o_socket_export_t *info)
 
 h2o_socket_t *do_import(h2o_loop_t *loop, h2o_socket_export_t *info)
 {
-    return h2o_evloop_socket_create(loop, info->fd, 0);
+    struct sockaddr_storage ss;
+    socklen_t sslen = sizeof(ss);
+    struct sockaddr *sa;
+
+    if (getpeername(info->fd, (void *)&ss, &sslen) == 0) {
+        sa = (void *)&ss;
+    } else {
+        sa = NULL;
+        sslen = 0;
+    }
+    return h2o_evloop_socket_create(loop, info->fd, sa, sslen, 0);
 }
 
 h2o_loop_t *h2o_socket_get_loop(h2o_socket_t *_sock)
@@ -343,24 +395,31 @@ socklen_t h2o_socket_getsockname(h2o_socket_t *_sock, struct sockaddr *sa)
     return len;
 }
 
-socklen_t get_peername_uncached(h2o_socket_t *_sock, struct sockaddr *sa)
+//not here as per new repository, its defined in socket.c
+socklen_t h2o_socket_getpeername(h2o_socket_t *_sock, struct sockaddr *sa)
 {
     struct st_h2o_evloop_socket_t *sock = (void *)_sock;
-    socklen_t len = sizeof(struct sockaddr_storage);
-    if (getpeername(sock->fd, sa, &len) != 0)
-        return 0;
-    return len;
+    memcpy(sa, &sock->peername.addr, sock->peername.len);
+    return sock->peername.len;
 }
 
-struct st_h2o_evloop_socket_t *create_socket(h2o_evloop_t *loop, int fd, int flags)
+struct st_h2o_evloop_socket_t *create_socket(h2o_evloop_t *loop, int fd, struct sockaddr *addr, socklen_t addrlen, int flags)
 {
     struct st_h2o_evloop_socket_t *sock;
 
+#ifdef _WIN32
+    u_long nonblock = 1;
+    ioctlsocket(fd, FIONBIO, &nonblock);
+#else
     fcntl(fd, F_SETFL, O_NONBLOCK);
+#endif
 
     sock = h2o_mem_alloc(sizeof(*sock));
     memset(sock, 0, sizeof(*sock));
     h2o_buffer_init(&sock->super.input, &h2o_socket_buffer_prototype);
+    assert(addrlen < sizeof(sock->peername.ss));
+    memcpy(&sock->peername.addr, addr, addrlen);
+    sock->peername.len = addrlen;
     sock->loop = loop;
     sock->fd = fd;
     sock->_flags = flags;
@@ -373,34 +432,52 @@ struct st_h2o_evloop_socket_t *create_socket(h2o_evloop_t *loop, int fd, int fla
     return sock;
 }
 
-static struct st_h2o_evloop_socket_t *create_socket_set_nodelay(h2o_evloop_t *loop, int fd, int flags)
+static struct st_h2o_evloop_socket_t *create_socket_set_nodelay(h2o_evloop_t *loop, int fd, struct sockaddr *addr,
+                                                                socklen_t addrlen, int flags)
 {
+#ifdef _WIN32
+    char on = 1;
+#else
     int on = 1;
+#endif
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
-    return create_socket(loop, fd, flags);
+    return create_socket(loop, fd, addr, addrlen, flags);
 }
 
-h2o_socket_t *h2o_evloop_socket_create(h2o_evloop_t *loop, int fd, int flags)
+h2o_socket_t *h2o_evloop_socket_create(h2o_evloop_t *loop, int fd, struct sockaddr *addr, socklen_t addrlen, int flags)
 {
+#ifdef _WIN32
+    u_long nonblock = 1;
+    ioctlsocket(fd, FIONBIO, &nonblock);
+#else
     fcntl(fd, F_SETFL, O_NONBLOCK);
-    return &create_socket(loop, fd, flags)->super;
+#endif
+    return &create_socket(loop, fd, addr, addrlen, flags)->super;
 }
 
 h2o_socket_t *h2o_evloop_socket_accept(h2o_socket_t *_listener)
 {
     struct st_h2o_evloop_socket_t *listener = (struct st_h2o_evloop_socket_t *)_listener;
+    struct sockaddr_storage addr;
+    socklen_t addrlen = sizeof(addr);
     int fd;
 
-#if H2O_USE_ACCEPT4
-    if ((fd = accept4(listener->fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC)) == -1)
+#ifdef __linux__
+    if ((fd = accept4(listener->fd, (void *)&addr, &addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC)) == -1)
         return NULL;
 #else
-    if ((fd = cloexec_accept(listener->fd, NULL, NULL)) == -1)
+    if ((fd = cloexec_accept(listener->fd, (void *)&addr, &addrlen)) == -1)
         return NULL;
+
+# ifdef _WIN32
+    u_long nonblock = 1;
+    ioctlsocket(fd, FIONBIO, &nonblock);
+# else
     fcntl(fd, F_SETFL, O_NONBLOCK);
+# endif
 #endif
 
-    return &create_socket_set_nodelay(listener->loop, fd, H2O_SOCKET_FLAG_IS_ACCEPTED_CONNECTION)->super;
+    return &create_socket_set_nodelay(listener->loop, fd, (void *)&addr, addrlen, 0)->super;
 }
 
 h2o_socket_t *h2o_socket_connect(h2o_loop_t *loop, struct sockaddr *addr, socklen_t addrlen, h2o_socket_cb cb)
@@ -410,13 +487,20 @@ h2o_socket_t *h2o_socket_connect(h2o_loop_t *loop, struct sockaddr *addr, sockle
 
     if ((fd = cloexec_socket(addr->sa_family, SOCK_STREAM, 0)) == -1)
         return NULL;
+
+#ifdef _WIN32
+    u_long nonblock = 1;
+    ioctlsocket(fd, FIONBIO, &nonblock);
+#else
     fcntl(fd, F_SETFL, O_NONBLOCK);
-    if (!(connect(fd, addr, addrlen) == 0 || errno == EINPROGRESS)) {
-        close(fd);
+#endif
+
+    if (!(connect(fd, addr, addrlen) == 0 || socket_error == EINPROGRESS)) {
+        close_socket(fd);
         return NULL;
     }
 
-    sock = create_socket_set_nodelay(loop, fd, H2O_SOCKET_FLAG_IS_CONNECTING);
+    sock = create_socket_set_nodelay(loop, fd, addr, addrlen, H2O_SOCKET_FLAG_IS_CONNECTING);
     sock->super._cb.write = cb;
     link_to_statechanged(sock);
     return &sock->super;
@@ -467,10 +551,13 @@ static void run_socket(struct st_h2o_evloop_socket_t *sock)
     }
 
     if (sock->super._cb.write != NULL && sock->_wreq.cnt == 0) {
+#ifdef _WIN32
+        char status;
+#else
         int status;
+#endif
         if ((sock->_flags & H2O_SOCKET_FLAG_IS_CONNECTING) != 0) {
             socklen_t l = sizeof(status);
-            status = 0;
             getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &status, &l);
             sock->_flags &= ~H2O_SOCKET_FLAG_IS_CONNECTING;
         } else {
@@ -487,19 +574,12 @@ static void run_socket(struct st_h2o_evloop_socket_t *sock)
 
 static void run_pending(h2o_evloop_t *loop)
 {
-    struct st_h2o_evloop_socket_t *sock;
-
-    while (loop->_pending_as_server != NULL || loop->_pending_as_client != NULL) {
-        while ((sock = loop->_pending_as_client) != NULL) {
-            loop->_pending_as_client = sock->_next_pending;
-            sock->_next_pending = sock;
-            run_socket(sock);
-        }
-        if ((sock = loop->_pending_as_server) != NULL) {
-            loop->_pending_as_server = sock->_next_pending;
-            sock->_next_pending = sock;
-            run_socket(sock);
-        }
+    while (loop->_pending != NULL) {
+        /* detach the first sock and run */
+        struct st_h2o_evloop_socket_t *sock = loop->_pending;
+        loop->_pending = sock->_next_pending;
+        sock->_next_pending = sock;
+        run_socket(sock);
     }
 }
 
@@ -519,9 +599,7 @@ int h2o_evloop_run(h2o_evloop_t *loop)
         h2o_timeout_t *timeout = H2O_STRUCT_FROM_MEMBER(h2o_timeout_t, _link, node);
         h2o_timeout_run(loop, timeout, loop->_now);
     }
-    /* assert h2o_timeout_run has called run_pending */
-    assert(loop->_pending_as_client == NULL);
-    assert(loop->_pending_as_server == NULL);
+    assert(loop->_pending == NULL); /* h2o_timeout_run calls run_pending */
 
     return 0;
 }

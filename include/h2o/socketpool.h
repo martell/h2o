@@ -26,15 +26,21 @@
 extern "C" {
 #endif
 
+#ifndef _WIN32
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <pthread.h>
+#endif
+
+//#include "winpthreads.h"
 #include "h2o/linklist.h"
 #include "h2o/multithread.h"
 #include "h2o/socket.h"
 #include "h2o/timeout.h"
 
-typedef enum en_h2o_socketpool_type_t { H2O_SOCKETPOOL_TYPE_NAMED, H2O_SOCKETPOOL_TYPE_SOCKADDR } h2o_socketpool_type_t;
+typedef enum en_h2o_socketpool_type_t {
+    H2O_SOCKETPOOL_TYPE_NAMED,
+    H2O_SOCKETPOOL_TYPE_SOCKADDR
+} h2o_socketpool_type_t;
 
 typedef struct st_h2o_socketpool_t {
 
@@ -61,7 +67,8 @@ typedef struct st_h2o_socketpool_t {
     /* vars that are modified by multiple threads */
     struct {
         size_t count; /* synchronous operations should be used to access the variable */
-        pthread_mutex_t mutex;
+        //pthread_mutex_t mutex;
+		uv_mutex_t mutex;
         h2o_linklist_t sockets; /* guarded by the mutex; list of struct pool_entry_t defined in socket/pool.c */
     } _shared;
 } h2o_socketpool_t;
@@ -72,40 +79,40 @@ typedef void (*h2o_socketpool_connect_cb)(h2o_socket_t *sock, const char *errstr
 /**
  * initializes a socket loop
  */
-void h2o_socketpool_init_by_address(h2o_socketpool_t *pool, struct sockaddr *sa, socklen_t salen, size_t capacity);
+void h2o_socketpool_init_by_address(struct st_h2o_socketpool_t *pool, struct sockaddr *sa, socklen_t salen, size_t capacity);
 /**
  * initializes a socket loop
  */
-void h2o_socketpool_init_by_hostport(h2o_socketpool_t *pool, h2o_iovec_t host, uint16_t port, size_t capacity);
+void h2o_socketpool_init_by_hostport(struct st_h2o_socketpool_t *pool, h2o_iovec_t host, uint16_t port, size_t capacity);
 /**
  * disposes of a socket loop
  */
-void h2o_socketpool_dispose(h2o_socketpool_t *pool);
+void h2o_socketpool_dispose(struct st_h2o_socketpool_t *pool);
 /**
  * sets a close timeout for the sockets being pooled
  */
-void h2o_socketpool_set_timeout(h2o_socketpool_t *pool, h2o_loop_t *loop, uint64_t msec);
+void h2o_socketpool_set_timeout(struct st_h2o_socketpool_t *pool, h2o_loop_t *loop, uint64_t msec);
 /**
  * connects to the peer (or returns a pooled connection)
  */
-void h2o_socketpool_connect(h2o_socketpool_connect_request_t **req, h2o_socketpool_t *pool, h2o_loop_t *loop,
+void h2o_socketpool_connect(h2o_socketpool_connect_request_t **req, struct st_h2o_socketpool_t *pool, h2o_loop_t *loop,
                             h2o_multithread_receiver_t *getaddr_receiver, h2o_socketpool_connect_cb cb, void *data);
 /**
  * cancels a connect request
  */
-void h2o_socketpool_cancel_connect(h2o_socketpool_connect_request_t *req);
+void h2o_socketpool_cancel_connect(struct st_h2o_socketpool_connect_request_t *req);
 /**
  * returns an idling socket to the socket pool
  */
-int h2o_socketpool_return(h2o_socketpool_t *pool, h2o_socket_t *sock);
+int h2o_socketpool_return(struct st_h2o_socketpool_t *pool, h2o_socket_t *sock);
 /**
  * determines if a socket belongs to the socket pool
  */
-static int h2o_socketpool_is_owned_socket(h2o_socketpool_t *pool, h2o_socket_t *sock);
+static int h2o_socketpool_is_owned_socket(struct st_h2o_socketpool_t *pool, h2o_socket_t *sock);
 
 /* inline defs */
 
-inline int h2o_socketpool_is_owned_socket(h2o_socketpool_t *pool, h2o_socket_t *sock)
+inline int h2o_socketpool_is_owned_socket(struct st_h2o_socketpool_t *pool, h2o_socket_t *sock)
 {
     return sock->on_close.data == pool;
 }

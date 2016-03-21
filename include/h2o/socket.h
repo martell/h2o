@@ -27,10 +27,17 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#include <sys/socket.h>
+
+#if(_WIN32)
+#include<winsock2.h>
+#include<ws2tcpip.h>
+#pragma comment(lib, "Ws2_32.lib")
+#else
+# include <sys/socket.h>
+#endif
+
 #include <openssl/ssl.h>
 #include "h2o/memory.h"
-#include "h2o/string_.h"
 
 #ifndef H2O_USE_LIBUV
 #if H2O_USE_SELECT || H2O_USE_EPOLL || H2O_USE_KQUEUE
@@ -52,6 +59,12 @@ extern "C" {
 #endif
 
 #define H2O_SOCKET_INITIAL_INPUT_BUFFER_SIZE 4096
+//-- : updated from comment on MinGW Discussion
+#ifdef _WIN32
+	typedef char sockopt_value;
+#else
+	typedef  int sockopt_value;
+#endif
 
 typedef struct st_h2o_socket_t h2o_socket_t;
 
@@ -63,18 +76,19 @@ typedef void (*h2o_socket_cb)(h2o_socket_t *sock, int err);
 #include "socket/evloop.h"
 #endif
 
-struct st_h2o_socket_peername_t {
+typedef struct st_h2o_socket_peername_t {
+    struct sockaddr_storage addr;
     socklen_t len;
-    struct sockaddr addr;
-};
+} h2o_socket_peername_t;
 
 /**
  * abstraction layer for sockets (SSL vs. TCP)
  */
 struct st_h2o_socket_t {
     void *data;
+    void *data2;
     struct st_h2o_socket_ssl_t *ssl;
-    h2o_buffer_t *input;
+    h2o_buffer_t *input; 
     size_t bytes_read;
     struct {
         void (*cb)(void *data);
@@ -84,21 +98,19 @@ struct st_h2o_socket_t {
         h2o_socket_cb read;
         h2o_socket_cb write;
     } _cb;
-    struct st_h2o_socket_peername_t *_peername;
+	// : introducing new member as per new repo
+	struct st_h2o_socket_peername_t *_peername;
 };
 
 typedef struct st_h2o_socket_export_t {
     int fd;
     struct st_h2o_socket_ssl_t *ssl;
-    h2o_buffer_t *input;
+	h2o_buffer_t *input;
 } h2o_socket_export_t;
 
-typedef void (*h2o_socket_ssl_resumption_get_async_cb)(h2o_socket_t *sock, h2o_iovec_t session_id);
-typedef void (*h2o_socket_ssl_resumption_new_cb)(h2o_iovec_t session_id, h2o_iovec_t session_data);
-typedef void (*h2o_socket_ssl_resumption_remove_cb)(h2o_iovec_t session_id);
-
 extern h2o_buffer_mmap_settings_t h2o_socket_buffer_mmap_settings;
-extern __thread h2o_buffer_prototype_t h2o_socket_buffer_prototype;
+//extern __thread h2o_buffer_prototype_t h2o_socket_buffer_prototype;
+extern h2o_buffer_prototype_t h2o_socket_buffer_prototype; //still need to figure out what thread does
 
 /**
  * returns the loop
@@ -164,23 +176,12 @@ socklen_t h2o_socket_getsockname(h2o_socket_t *sock, struct sockaddr *sa);
  */
 socklen_t h2o_socket_getpeername(h2o_socket_t *sock, struct sockaddr *sa);
 /**
- * sets the remote address (used for overriding the value)
- */
-void h2o_socket_setpeername(h2o_socket_t *sock, struct sockaddr *sa, socklen_t len);
-/**
- *
- */
-const char *h2o_socket_get_ssl_protocol_version(h2o_socket_t *sock);
-int h2o_socket_get_ssl_session_reused(h2o_socket_t *sock);
-const char *h2o_socket_get_ssl_cipher(h2o_socket_t *sock);
-int h2o_socket_get_ssl_cipher_bits(h2o_socket_t *sock);
-static h2o_iovec_t h2o_socket_log_ssl_protocol_version(h2o_socket_t *sock, h2o_mem_pool_t *pool);
-static h2o_iovec_t h2o_socket_log_ssl_session_reused(h2o_socket_t *sock, h2o_mem_pool_t *pool);
-static h2o_iovec_t h2o_socket_log_ssl_cipher(h2o_socket_t *sock, h2o_mem_pool_t *pool);
-h2o_iovec_t h2o_socket_log_ssl_cipher_bits(h2o_socket_t *sock, h2o_mem_pool_t *pool);
-/**
  * compares socket addresses
  */
+
+//-- : introducing new function complimenting getpeername from latest repo.
+void h2o_socket_setpeername(h2o_socket_t *sock, struct sockaddr *sa, socklen_t len);
+
 int h2o_socket_compare_address(struct sockaddr *x, struct sockaddr *y);
 /**
  * getnameinfo (buf should be NI_MAXHOST in length), returns SIZE_MAX if failed
@@ -197,21 +198,6 @@ int32_t h2o_socket_getport(struct sockaddr *sa);
  * @param handshake_cb callback to be called when handshake is complete
  */
 void h2o_socket_ssl_server_handshake(h2o_socket_t *sock, SSL_CTX *ssl_ctx, h2o_socket_cb handshake_cb);
-/**
- * resumes SSL handshake with given session data
- * @param sock the socket
- * @param session_data session data (or {NULL,0} if not available)
- */
-void h2o_socket_ssl_resume_server_handshake(h2o_socket_t *sock, h2o_iovec_t session_data);
-/**
- * registers callbacks to be called for handling session data
- */
-void h2o_socket_ssl_async_resumption_init(h2o_socket_ssl_resumption_get_async_cb get_cb, h2o_socket_ssl_resumption_new_cb new_cb,
-                                          h2o_socket_ssl_resumption_remove_cb remove_cb);
-/**
- * setups the SSL context to use the async resumption
- */
-void h2o_socket_ssl_async_resumption_setup_ctx(SSL_CTX *ctx);
 /**
  * returns the name of the protocol selected using either NPN or ALPN (ALPN has the precedence).
  * @param sock the socket
@@ -241,29 +227,29 @@ inline int h2o_socket_is_reading(h2o_socket_t *sock)
     return sock->_cb.read != NULL;
 }
 
-inline h2o_iovec_t h2o_socket_log_ssl_protocol_version(h2o_socket_t *sock, h2o_mem_pool_t *pool)
-{
-    const char *s = h2o_socket_get_ssl_protocol_version(sock);
-    return s != NULL ? h2o_iovec_init(s, strlen(s)) : h2o_iovec_init(H2O_STRLIT("-"));
-}
+//-- : updated from repository
+// We could look at possibly adding fcntl to mingw-w64 ?
+#ifdef _WIN32
+// the values do not matter
+#define F_SETFD  2
+#define O_NONBLOCK 0x4000
 
-inline h2o_iovec_t h2o_socket_log_ssl_session_reused(h2o_socket_t *sock, h2o_mem_pool_t *pool)
+static inline int fcntl(int s, int cmd, long arg)
 {
-    switch (h2o_socket_get_ssl_session_reused(sock)) {
-    case 0:
-        return h2o_iovec_init(H2O_STRLIT("0"));
-    case 1:
-        return h2o_iovec_init(H2O_STRLIT("1"));
-    default:
-        return h2o_iovec_init(H2O_STRLIT("-"));
-    }
-}
+	u_long nonblock = 0;
 
-inline h2o_iovec_t h2o_socket_log_ssl_cipher(h2o_socket_t *sock, h2o_mem_pool_t *pool)
-{
-    const char *s = h2o_socket_get_ssl_cipher(sock);
-    return s != NULL ? h2o_iovec_init(s, strlen(s)) : h2o_iovec_init(H2O_STRLIT("-"));
+	if (arg && O_NONBLOCK)
+		nonblock = 1;
+	else
+		return -1;
+
+	if (cmd == F_SETFD)
+		ioctlsocket(s, FIONBIO, &nonblock);
+
+	return s != SOCKET_ERROR ? s : -1;
 }
+#endif
+
 
 #ifdef __cplusplus
 }

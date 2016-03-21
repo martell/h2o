@@ -20,12 +20,22 @@
  * IN THE SOFTWARE.
  */
 #include <errno.h>
+#ifndef _WIN32
 #include <netdb.h>
-#include <stdio.h>
 #include <sys/socket.h>
+#endif
+#include <stdio.h>
 #include <sys/types.h>
 #include "h2o/socket.h"
 #include "h2o/string_.h"
+
+#ifdef _WIN32
+#pragma comment(lib, "IPHLPAPI.lib") 
+#pragma comment(lib, "Psapi.lib")
+#pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "Userenv.lib")
+#endif
 
 static h2o_loop_t *loop;
 static int exit_loop;
@@ -58,7 +68,7 @@ static void on_write(h2o_socket_t *sock, int status)
 
 static void on_connect(h2o_socket_t *sock, int status)
 {
-    h2o_iovec_t *send_data = sock->data;
+    h2o_iovec_t  *send_data = sock->data;
 
     if (status != 0) {
         /* connection failed */
@@ -76,7 +86,7 @@ int main(int argc, char **argv)
     struct addrinfo hints, *res = NULL;
     int err, ret = 1;
     h2o_socket_t *sock;
-    h2o_iovec_t send_data = {H2O_STRLIT("GET / HTTP/1.0\r\n\r\n")};
+    h2o_iovec_t  send_data = {H2O_STRLIT("GET / HTTP/1.0\r\n\r\n")};
 
     if (argc != 3) {
         fprintf(stderr, "Usage: %s <host> <port>\n", argv[0]);

@@ -19,34 +19,37 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
+
 #include "h2o/hostinfo.h"
+#include "uv.h"
+
 
 struct st_h2o_hostinfo_getaddr_req_t {
-    h2o_multithread_receiver_t *_receiver;
-    h2o_hostinfo_getaddr_cb _cb;
-    void *cbdata;
-    h2o_linklist_t _pending;
-    union {
-        struct {
-            char *name;
-            char *serv;
-            struct addrinfo hints;
-        } _in;
-        struct {
-            h2o_multithread_message_t message;
-            const char *errstr;
-            struct addrinfo *ai;
-        } _out;
-    };
+	h2o_multithread_receiver_t *_receiver;
+	struct  h2o_hostinfo_getaddr_cb *_cb;
+	void *cbdata;
+	h2o_linklist_t _pending;
+	union {
+		struct {
+			char *name;
+			char *serv;
+			struct addrinfo hints;
+		} _in;
+		struct {
+			h2o_multithread_message_t message;
+			const char *errstr;
+			struct addrinfo *ai;
+		} _out;
+	};
 };
 
 static struct {
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    h2o_linklist_t pending; /* anchor of h2o_hostinfo_getaddr_req_t::_pending */
-    size_t num_threads;
-    size_t num_threads_idle;
-} queue = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, {&queue.pending, &queue.pending}, 0, 0};
+	uv_mutex_t mutex;
+	uv_cond_t cond;
+	h2o_linklist_t pending; /* anchor of h2o_hostinfo_getaddr_req_t::_pending */
+	size_t num_threads;
+	size_t num_threads_idle;
+} queue = {UV_MUTEX_INITIALIZER, UV_COND_INITIALIZER,{ &queue.pending, &queue.pending }, 0, 0 };
 
 size_t h2o_hostinfo_max_threads = 1;
 
@@ -55,7 +58,8 @@ static void lookup_and_respond(h2o_hostinfo_getaddr_req_t *req)
     struct addrinfo *res;
 
     int ret = getaddrinfo(req->_in.name, req->_in.serv, &req->_in.hints, &res);
-    req->_out.message = (h2o_multithread_message_t){};
+	h2o_multithread_message_t tmp = {0};
+	req->_out.message = tmp; // Guess its just a warning?
     if (ret != 0) {
         req->_out.errstr = gai_strerror(ret);
         req->_out.ai = NULL;
@@ -63,40 +67,64 @@ static void lookup_and_respond(h2o_hostinfo_getaddr_req_t *req)
         req->_out.errstr = NULL;
         req->_out.ai = res;
     }
-
     h2o_multithread_send_message(req->_receiver, &req->_out.message);
 }
 
 static void *lookup_thread_main(void *_unused)
 {
-    pthread_mutex_lock(&queue.mutex);
-
+#ifdef _WIN32
+	uv_mutex_lock(&queue.mutex);
+#else
+	pthread_mutex_lock(&queue.mutex);
+#endif
     while (1) {
         while (!h2o_linklist_is_empty(&queue.pending)) {
             h2o_hostinfo_getaddr_req_t *req = H2O_STRUCT_FROM_MEMBER(h2o_hostinfo_getaddr_req_t, _pending, queue.pending.next);
             h2o_linklist_unlink(&req->_pending);
-            pthread_mutex_unlock(&queue.mutex);
+#ifdef _WIN32
+			uv_mutex_unlock(&queue.mutex);
+#else
+			pthread_mutex_unlock(&queue.mutex);
+#endif
             lookup_and_respond(req);
-            pthread_mutex_lock(&queue.mutex);
+#ifdef _WIN32
+            uv_mutex_lock(&queue.mutex);
+#else
+			pthread_mutex_lock(&queue.mutex);
+#endif
         }
-        pthread_cond_wait(&queue.cond, &queue.mutex);
+#ifdef _WIN32
+        uv_cond_wait(&queue.cond, &queue.mutex);
+#else 
+		pthread_cond_wait(&queue.cond, &queue.mutex);
+#endif
     }
 
-    pthread_mutex_unlock(&queue.mutex);
-
+#ifdef _WIN32
+    uv_mutex_unlock(&queue.mutex);
+#else
+	pthread_mutex_unlock(&queue.mutex);
+#endif
     return NULL;
 }
 
 static void create_lookup_thread(void)
 {
-    pthread_t tid;
-    pthread_attr_t attr;
+#ifdef _WIN32
+	uv_thread_t tid;
+#else
+	pthread_t tid;
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, 1);
+	pthread_attr_setstacksize(&attr, 100 * 1024);
+#endif    
     int ret;
-
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, 1);
-    pthread_attr_setstacksize(&attr, 100 * 1024);
-    if ((ret = pthread_create(&tid, NULL, lookup_thread_main, NULL)) != 0) {
+#ifdef _WIN32
+	if ((ret = uv_thread_create(&tid, lookup_thread_main, NULL)) != 0) {
+#else
+	if ((ret = pthread_thread_create(&tid, lookup_thread_main, NULL)) != 0) {
+#endif
         if (queue.num_threads == 0) {
             fprintf(stderr, "failed to start first thread for getaddrinfo:%s\n", strerror(ret));
             abort();
@@ -105,21 +133,21 @@ static void create_lookup_thread(void)
         }
         return;
     }
-
     ++queue.num_threads;
     ++queue.num_threads_idle;
 }
 
-h2o_hostinfo_getaddr_req_t *h2o_hostinfo_getaddr(h2o_multithread_receiver_t *receiver, h2o_iovec_t name, h2o_iovec_t serv,
-                                                 int family, int socktype, int protocol, int flags, h2o_hostinfo_getaddr_cb cb,
-                                                 void *cbdata)
+h2o_hostinfo_getaddr_req_t *h2o_hostinfo_getaddr(h2o_multithread_receiver_t *receiver, h2o_iovec_t  name, h2o_iovec_t  serv,
+												int family, int socktype, int protocol, int flags, struct h2o_hostinfo_getaddr_cb *cb, 
+												void *cbdata)
 {
     h2o_hostinfo_getaddr_req_t *req = h2o_mem_alloc(sizeof(*req) + name.len + 1 + serv.len + 1);
     req->_receiver = receiver;
     req->_cb = cb;
     req->cbdata = cbdata;
-    req->_pending = (h2o_linklist_t){};
-    req->_in.name = (char *)req + sizeof(*req);
+	h2o_linklist_t temp = {0};
+    req->_pending = temp; 
+	req->_in.name = (char *)req + sizeof(*req);
     memcpy(req->_in.name, name.base, name.len);
     req->_in.name[name.len] = '\0';
     req->_in.serv = req->_in.name + name.len + 1;
@@ -138,22 +166,33 @@ h2o_hostinfo_getaddr_req_t *h2o_hostinfo_getaddr(h2o_multithread_receiver_t *rec
 
 void h2o__hostinfo_getaddr_dispatch(h2o_hostinfo_getaddr_req_t *req)
 {
-    pthread_mutex_lock(&queue.mutex);
-
+#ifdef _WIN32
+	uv_mutex_lock(&queue.mutex);
+#else
+	pthread_mutex_lock(&queue.mutex);
+#endif
     h2o_linklist_insert(&queue.pending, &req->_pending);
 
     if (queue.num_threads_idle == 0 && queue.num_threads < h2o_hostinfo_max_threads)
         create_lookup_thread();
 
-    pthread_cond_signal(&queue.cond);
-    pthread_mutex_unlock(&queue.mutex);
+#ifdef _WIN32
+	uv_cond_signal(&queue.cond);
+	uv_mutex_unlock(&queue.mutex);
+#else
+	pthread_cond_signal(&queue.cond);
+	pthread_mutex_unlock(&queue.mutex);
+#endif
 }
 
 void h2o_hostinfo_getaddr_cancel(h2o_hostinfo_getaddr_req_t *req)
 {
     int should_free = 0;
-
-    pthread_mutex_lock(&queue.mutex);
+#ifdef _WIN32
+	uv_mutex_lock(&queue.mutex);
+#else
+	pthread_mutex_lock(&queue.mutex);
+#endif
 
     if (h2o_linklist_is_linked(&req->_pending)) {
         h2o_linklist_unlink(&req->_pending);
@@ -161,9 +200,11 @@ void h2o_hostinfo_getaddr_cancel(h2o_hostinfo_getaddr_req_t *req)
     } else {
         req->_cb = NULL;
     }
-
-    pthread_mutex_unlock(&queue.mutex);
-
+#ifdef _WIN32
+	uv_mutex_unlock(&queue.mutex);
+#else
+	pthread_mutex_unlock(&queue.mutex);
+#endif
     if (should_free)
         free(req);
 }
@@ -201,7 +242,7 @@ static const char *fetch_aton_digit(const char *p, const char *end, unsigned cha
     return p;
 }
 
-int h2o_hostinfo_aton(h2o_iovec_t host, struct in_addr *addr)
+int h2o_hostinfo_aton(h2o_iovec_t  host, struct in_addr *addr)
 {
     union {
         int32_t n;
@@ -226,3 +267,4 @@ int h2o_hostinfo_aton(h2o_iovec_t host, struct in_addr *addr)
     addr->s_addr = value.n;
     return 0;
 }
+

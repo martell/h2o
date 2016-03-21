@@ -28,20 +28,33 @@
 #include "h2o/url.h"
 #include "h2o/http1client.h"
 
+
+//--Linker issues for LibUV
+#ifdef _WIN32
+//#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "IPHLPAPI.lib") 
+#pragma comment(lib, "Psapi.lib")
+#pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "Userenv.lib")
+#endif
+
+
+
 static h2o_socketpool_t *sockpool;
 static h2o_mem_pool_t pool;
 static const char *url;
 static int cnt_left = 3;
 
-static h2o_http1client_head_cb on_connect(h2o_http1client_t *client, const char *errstr, h2o_iovec_t **reqbufs, size_t *reqbufcnt,
+static h2o_http1client_head_cb on_connect(h2o_http1client_t *client, const char *errstr, h2o_iovec_t  **reqbufs, size_t *reqbufcnt,
                                           int *method_is_head);
 static h2o_http1client_body_cb on_head(h2o_http1client_t *client, const char *errstr, int minor_version, int status,
-                                       h2o_iovec_t msg, struct phr_header *headers, size_t num_headers);
+                                       h2o_iovec_t  msg, struct phr_header *headers, size_t num_headers);
 
 static void start_request(h2o_http1client_ctx_t *ctx)
 {
     h2o_url_t url_parsed;
-    h2o_iovec_t *req;
+    h2o_iovec_t  *req;
 
     /* clear memory pool */
     h2o_mem_clear_pool(&pool);
@@ -67,9 +80,9 @@ static void start_request(h2o_http1client_ctx_t *ctx)
     if (1) {
         if (sockpool == NULL) {
             sockpool = h2o_mem_alloc(sizeof(*sockpool));
-            h2o_socketpool_init_by_hostport(sockpool, url_parsed.host, h2o_url_get_port(&url_parsed), 10);
-            h2o_socketpool_set_timeout(sockpool, ctx->loop, 5000 /* in msec */);
-        }
+			h2o_socketpool_init_by_hostport(sockpool, url_parsed.host, h2o_url_get_port(&url_parsed), 10);
+			h2o_socketpool_set_timeout(sockpool, ctx->loop, 5000 /* in msec */);
+		}
         h2o_http1client_connect_with_pool(NULL, req, ctx, sockpool, on_connect);
     } else {
         h2o_http1client_connect(NULL, req, ctx, url_parsed.host, h2o_url_get_port(&url_parsed), on_connect);
@@ -98,7 +111,7 @@ static int on_body(h2o_http1client_t *client, const char *errstr)
     return 0;
 }
 
-h2o_http1client_body_cb on_head(h2o_http1client_t *client, const char *errstr, int minor_version, int status, h2o_iovec_t msg,
+h2o_http1client_body_cb on_head(h2o_http1client_t *client, const char *errstr, int minor_version, int status, h2o_iovec_t  msg,
                                 struct phr_header *headers, size_t num_headers)
 {
     size_t i;
@@ -123,7 +136,7 @@ h2o_http1client_body_cb on_head(h2o_http1client_t *client, const char *errstr, i
     return on_body;
 }
 
-h2o_http1client_head_cb on_connect(h2o_http1client_t *client, const char *errstr, h2o_iovec_t **reqbufs, size_t *reqbufcnt,
+h2o_http1client_head_cb on_connect(h2o_http1client_t *client, const char *errstr, h2o_iovec_t  **reqbufs, size_t *reqbufcnt,
                                    int *method_is_head)
 {
     if (errstr != NULL) {
@@ -132,7 +145,7 @@ h2o_http1client_head_cb on_connect(h2o_http1client_t *client, const char *errstr
         return NULL;
     }
 
-    *reqbufs = (h2o_iovec_t *)client->data;
+    *reqbufs = (h2o_iovec_t  *)client->data;
     *reqbufcnt = 1;
     *method_is_head = 0;
 
@@ -141,6 +154,13 @@ h2o_http1client_head_cb on_connect(h2o_http1client_t *client, const char *errstr
 
 int main(int argc, char **argv)
 {
+//Debug: argv[1] = http://www.google.com, as Command arguments
+
+#ifdef _WIN32
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 0), &wsaData);
+#endif
+
     h2o_multithread_queue_t *queue;
     h2o_multithread_receiver_t getaddr_receiver;
     h2o_timeout_t io_timeout;
@@ -151,8 +171,8 @@ int main(int argc, char **argv)
         return 1;
     }
     url = argv[1];
-
-    h2o_mem_init_pool(&pool);
+    
+	h2o_mem_init_pool(&pool);
 
 /* setup context */
 #if H2O_USE_LIBUV
@@ -166,10 +186,11 @@ int main(int argc, char **argv)
 
     /* setup the first request */
     start_request(&ctx);
-
-    while (cnt_left != 0) {
+	
+	while (cnt_left != 0) {
 #if H2O_USE_LIBUV
         uv_run(ctx.loop, UV_RUN_ONCE);
+		printf("cnt_left %d \n", cnt_left);
 #else
         h2o_evloop_run(ctx.loop);
 #endif

@@ -76,7 +76,7 @@ uint8_t *h2o_http2_encode_frame_header(uint8_t *dst, size_t length, uint8_t type
 
 static uint8_t *allocate_frame(h2o_buffer_t **buf, size_t length, uint8_t type, uint8_t flags, int32_t stream_id)
 {
-    h2o_iovec_t alloced = h2o_buffer_reserve(buf, H2O_HTTP2_FRAME_HEADER_SIZE + length);
+    h2o_iovec_t  alloced = h2o_buffer_reserve(buf, H2O_HTTP2_FRAME_HEADER_SIZE + length);
     (*buf)->size += H2O_HTTP2_FRAME_HEADER_SIZE + length;
     return h2o_http2_encode_frame_header((uint8_t *)alloced.base, length, type, flags, stream_id);
 }
@@ -94,7 +94,7 @@ void h2o_http2_encode_ping_frame(h2o_buffer_t **buf, int is_ack, const uint8_t *
     dst += 8;
 }
 
-void h2o_http2_encode_goaway_frame(h2o_buffer_t **buf, uint32_t last_stream_id, int errnum, h2o_iovec_t additional_data)
+void h2o_http2_encode_goaway_frame(h2o_buffer_t **buf, uint32_t last_stream_id, int errnum, h2o_iovec_t  additional_data)
 {
     uint8_t *dst = allocate_frame(buf, 8 + additional_data.len, H2O_HTTP2_FRAME_TYPE_GOAWAY, 0, 0);
     dst = h2o_http2_encode32u(dst, last_stream_id);

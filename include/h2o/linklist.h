@@ -26,6 +26,11 @@
 extern "C" {
 #endif
 
+#if defined _MSC_VER && defined __EDG__ && !defined __cplusplus
+#define inline
+#endif
+
+
 #include <assert.h>
 #include <stddef.h>
 

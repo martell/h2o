@@ -19,7 +19,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#include <stdlib.h>
+//#include <stdlib.h>
 #include "../../test.h"
 #include "../../../../lib/common/multithread.c"
 
@@ -47,8 +47,11 @@ struct {
 static void send_empty_message(h2o_multithread_receiver_t *receiver)
 {
     h2o_multithread_message_t *message = h2o_mem_alloc(sizeof(*message));
-    *message = (h2o_multithread_message_t){};
-    h2o_multithread_send_message(receiver, message);
+	// Expected Identifier
+    //*message = (h2o_multithread_message_t){};
+	h2o_multithread_message_t temp = {0};
+	*message = temp;
+	h2o_multithread_send_message(receiver, message);
 }
 
 static void pop_empty_message(h2o_linklist_t *list)
@@ -120,7 +123,11 @@ static void *worker_main(void *_unused)
 
 void test_lib__common__multithread_c(void)
 {
-    pthread_t tid;
+#ifdef _WIN32
+    uv_thread_t tid;
+#else
+	pthread_t tid;
+#endif
 
     main_thread.loop = create_loop();
     main_thread.queue = h2o_multithread_create_queue(main_thread.loop);
@@ -130,8 +137,11 @@ void test_lib__common__multithread_c(void)
     worker_thread.queue = h2o_multithread_create_queue(worker_thread.loop);
     h2o_multithread_register_receiver(worker_thread.queue, &worker_thread.ping_receiver, on_ping);
 
-    pthread_create(&tid, NULL, worker_main, NULL);
-
+#ifdef _WIN32
+	uv_thread_create(&tid, worker_main, NULL);
+#else
+	pthread_create(&tid, NULL, worker_main, NULL);
+#endif
     /* send first message */
     send_empty_message(&worker_thread.ping_receiver);
 
@@ -142,8 +152,6 @@ void test_lib__common__multithread_c(void)
         h2o_evloop_run(main_thread.loop);
 #endif
     }
-
-    pthread_join(tid, NULL);
 
     h2o_multithread_unregister_receiver(worker_thread.queue, &worker_thread.ping_receiver);
     h2o_multithread_destroy_queue(worker_thread.queue);

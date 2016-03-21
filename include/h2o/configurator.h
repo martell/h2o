@@ -40,13 +40,16 @@ enum {
 
 #define H2O_CONFIGURATOR_NUM_LEVELS 4
 
-typedef struct st_h2o_configurator_context_t {
+
+#ifndef __GNUC__ 
+#define __attribute__(a)
+#endif
+
+
+typedef struct h2o_configurator_context_t {
     h2o_globalconf_t *globalconf;
     h2o_hostconf_t *hostconf;
     h2o_pathconf_t *pathconf;
-    h2o_mimemap_t **mimemap;
-    int dry_run;
-    struct st_h2o_configurator_context_t *parent;
 } h2o_configurator_context_t;
 
 typedef int (*h2o_configurator_dispose_cb)(h2o_configurator_t *configurator);
@@ -113,7 +116,7 @@ h2o_configurator_command_t *h2o_configurator_get_command(h2o_globalconf_t *conf,
  * applies the configuration to the context
  * @return 0 if successful, -1 if not
  */
-int h2o_configurator_apply(h2o_globalconf_t *config, yoml_t *node, int dry_run);
+int h2o_configurator_apply(h2o_globalconf_t *config, yoml_t *node);
 /**
  *
  */
@@ -121,8 +124,11 @@ int h2o_configurator_apply_commands(h2o_configurator_context_t *ctx, yoml_t *nod
 /**
  * emits configuration error
  */
-void h2o_configurator_errprintf(h2o_configurator_command_t *cmd, yoml_t *node, const char *reason, ...)
-    __attribute__((format(printf, 3, 4)));
+
+//
+//void h2o_configurator_errprintf(h2o_configurator_command_t *cmd, yoml_t *node, const char *reason, .  __attribute__((format(printf, 3, 4))));
+//
+
 /**
  * interprets the configuration value using sscanf, or prints an error upon failure
  * @param configurator configurator
@@ -130,10 +136,12 @@ void h2o_configurator_errprintf(h2o_configurator_command_t *cmd, yoml_t *node, c
  * @param fmt scanf-style format string
  * @return 0 if successful, -1 if not
  */
-int h2o_configurator_scanf(h2o_configurator_command_t *cmd, yoml_t *node, const char *fmt, ...)
-    __attribute__((format(scanf, 3, 4)));
-/**
- * interprets the configuration value and returns the index of the matched string within the candidate strings, or prints an error
+
+
+int h2o_configurator_scanf(h2o_configurator_command_t *cmd, yoml_t *node, const char *fmt, ...) __attribute__((format(scanf, 3, 4)));
+
+
+/** * interprets the configuration value and returns the index of the matched string within the candidate strings, or prints an error
  * upon failure
  * @param configurator configurator
  * @param node configuration value

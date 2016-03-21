@@ -19,53 +19,76 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#include <fcntl.h>
+
+#include <fcntl.h> //To set flags.
 #include "cloexec.h"
 
-pthread_mutex_t cloexec_mutex = PTHREAD_MUTEX_INITIALIZER;
+uv_mutex_t cloexec_mutex = UV_MUTEX_INITIALIZER;
 
 static int set_cloexec(int fd)
 {
-    return fcntl(fd, F_SETFD, FD_CLOEXEC) != -1 ? 0 : -1;
+	//It sets the close-on-exec flag for the file descriptor, which causes the 
+	//file descriptor to be automatically (and atomically) closed when any of the exec-family functions succeed.
+#ifndef _WIN32
+	return fcntl(fd, F_SETFD, FD_CLOEXEC) != -1 ? 0 : -1;
+#endif
+	//return	ioctl(fd, FIOCLEX, 0);
+	return 0; //When ever creating a socket, create it with WSA_SOCKET, and set the flag there itself. You can't seemingly set the flag once its already							//created as a socket.
 }
 
 /*
  * note: the socket must be in non-blocking mode, or the call might block while the mutex is being locked
  */
+
+//Windows: referenced in evloop.c.h, while porting evloop take care of this.
 int cloexec_accept(int socket, struct sockaddr *addr, socklen_t *addrlen)
 {
     int fd = -1;
-    pthread_mutex_lock(&cloexec_mutex);
+    uv_mutex_lock(&cloexec_mutex);
 
-    if ((fd = accept(socket, addr, addrlen)) == -1)
+#ifdef __linux__ 
+    if ((fd = accept(socket, addr, addrlen)) == -1) 
         goto Exit;
     if (set_cloexec(fd) != 0) {
-        close(fd);
+        close(fd); 
         fd = -1;
         goto Exit;
     }
+#else // Windows
+	if ((fd = accept(socket, addr, addrlen)) == INVALID_SOCKET) //For windows SOCKET is something like "typedef unsigned int SOCKET;" 
+		goto Exit; 
+	// No way to set the flag!
+	//if (set_cloexec(fd) != 0) {
+	//	closesocket(fd); //close() as it is, is depracated by Visual studio, switching it to _close(), but the later expects a FileHandle again which is an int itself so should work.
+	//	fd = -1;
+	//	goto Exit;
+	//}
+#endif
 
 Exit:
-    pthread_mutex_unlock(&cloexec_mutex);
+    uv_mutex_unlock(&cloexec_mutex);
     return fd;
 }
 
 int cloexec_pipe(int fds[2])
 {
 #ifdef __linux__
-    return pipe2(fds, O_CLOEXEC);
+    return pipe2(fds, O_CLOEXEC); //on success 0 is returned.
 #else
     int ret = -1;
-    pthread_mutex_lock(&cloexec_mutex);
+    uv_mutex_lock(&cloexec_mutex);
+	//pipe not a visual C function, instead using _pipe
+    //if (pipe(fds) != 0) don't know what type of file exactly its supposed to read or write so assuming for now as to be an Text
 
-    if (pipe(fds) != 0)
+	if (_pipe(fds, 4096, O_TEXT) != 0) 
         goto Exit;
-    if (set_cloexec(fds[0]) != 0 || set_cloexec(fds[1]) != 0)
-        goto Exit;
+
+    //if (set_cloexec(fds[0]) != 0 || set_cloexec(fds[1]) != 0)
+        //goto Exit;
     ret = 0;
 
 Exit:
-    pthread_mutex_unlock(&cloexec_mutex);
+    uv_mutex_unlock(&cloexec_mutex);
     return ret;
 #endif
 }
@@ -76,18 +99,29 @@ int cloexec_socket(int domain, int type, int protocol)
     return socket(domain, type | SOCK_CLOEXEC, protocol);
 #else
     int fd = -1;
-    pthread_mutex_lock(&cloexec_mutex);
+    uv_mutex_lock(&cloexec_mutex);
 
-    if ((fd = socket(domain, type, protocol)) == -1)
-        goto Exit;
-    if (set_cloexec(fd) != 0) {
-        close(fd);
-        fd = -1;
-        goto Exit;
-    }
+    
+#ifdef _WIN32
+	if ((fd = socket(domain, type, protocol)) == INVALID_SOCKET) 
+		goto Exit;
 
+  //  if (set_cloexec(fd) != 0) {
+		//closesocket(fd);
+  //      fd = -1;
+  //      goto Exit;
+  //  }
+#else
+	if ((fd = socket(domain, type, protocol)) == -1)
+		goto Exit;
+	if (set_cloexec(fd) != 0) {
+		close(fd);
+		closesocket(fd);
+		fd = -1;
+		goto Exit;
+#endif
 Exit:
-    pthread_mutex_unlock(&cloexec_mutex);
+    uv_mutex_unlock(&cloexec_mutex);
     return fd;
 #endif
 }

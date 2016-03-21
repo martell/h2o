@@ -130,37 +130,28 @@ int h2o_time_parse_rfc1123(const char *s, size_t len, struct tm *tm)
         return -1;
     }
 #undef MAP
-#undef PACK3
+#undef PACK4
 
     return 0;
 }
 
-static int calc_gmt_offset(time_t t, struct tm *local)
-{
-    struct tm gmt;
-    int delta;
-
-    gmtime_r(&t, &gmt);
-    delta = (local->tm_hour - gmt.tm_hour) * 60 + (local->tm_min - gmt.tm_min);
-
-    if (local->tm_yday != gmt.tm_yday) {
-        int day_offset;
-        if (local->tm_year == gmt.tm_year)
-            day_offset = local->tm_yday - gmt.tm_yday;
-        else
-            day_offset = local->tm_year - gmt.tm_year;
-        delta += day_offset * 24 * 60;
-    }
-    return delta;
-}
-
 void h2o_time2str_log(char *buf, time_t time)
 {
+	//Posix stuff..... 
     struct tm localt;
-    localtime_r(&time, &localt);
-    int gmt_off = calc_gmt_offset(time, &localt);
-    int gmt_sign;
+#ifdef _WIN32
+	localtime_s(&localt, &time);
+#else
+	localtime_r(&time, &localt);
+#endif
 
+	#ifdef HAVE_TM_GMTOFF //Crapily fixed for timezone.
+	int gmt_off = (int)(localt.tm_gmtoff / 60);
+	#else
+	int gmt_off = 0;
+	#endif
+
+	int gmt_sign;
     if (gmt_off >= 0) {
         gmt_sign = '+';
     } else {
@@ -168,8 +159,9 @@ void h2o_time2str_log(char *buf, time_t time)
         gmt_sign = '-';
     }
 
-    int len = sprintf(buf, "%02d/%s/%d:%02d:%02d:%02d %c%02d%02d", localt.tm_mday,
+    int len = sprintf(buf,"%02d/%s/%d:%02d:%02d:%02d %c%02d%02d", localt.tm_mday,
                       ("Jan\0Feb\0Mar\0Apr\0May\0Jun\0Jul\0Aug\0Sep\0Oct\0Nov\0Dec\0") + localt.tm_mon * 4, localt.tm_year + 1900,
                       localt.tm_hour, localt.tm_min, localt.tm_sec, gmt_sign, gmt_off / 60, gmt_off % 60);
+
     assert(len == H2O_TIMESTR_LOG_LEN);
 }

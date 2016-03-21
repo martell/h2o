@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2016 DeNA Co., Ltd., Kazuho Oku, Justin Zhu
+ * Copyright (c) 2014,2015 DeNA Co., Ltd., Kazuho Oku, Justin Zhu
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -26,9 +26,9 @@
 #include <time.h>
 #include "h2o/string_.h"
 
-h2o_iovec_t h2o_strdup(h2o_mem_pool_t *pool, const char *s, size_t slen)
+h2o_iovec_t  h2o_strdup(h2o_mem_pool_t *pool, const char *s, size_t slen)
 {
-    h2o_iovec_t ret;
+    h2o_iovec_t  ret;
 
     if (slen == SIZE_MAX)
         slen = strlen(s);
@@ -44,9 +44,9 @@ h2o_iovec_t h2o_strdup(h2o_mem_pool_t *pool, const char *s, size_t slen)
     return ret;
 }
 
-h2o_iovec_t h2o_strdup_slashed(h2o_mem_pool_t *pool, const char *src, size_t len)
+h2o_iovec_t  h2o_strdup_slashed(h2o_mem_pool_t *pool, const char *src, size_t len)
 {
-    h2o_iovec_t ret;
+    h2o_iovec_t  ret;
 
     ret.len = len != SIZE_MAX ? len : strlen(src);
     ret.base = pool != NULL ? h2o_mem_alloc_pool(pool, ret.len + 2) : h2o_mem_alloc(ret.len + 2);
@@ -69,7 +69,7 @@ int h2o__lcstris_core(const char *target, const char *test, size_t test_len)
 size_t h2o_strtosize(const char *s, size_t len)
 {
     uint64_t v = 0, m = 1;
-    const char *p = s + len;
+    const char *p = s + len; //ex: points to ; 
 
     if (len == 0)
         goto Error;
@@ -78,7 +78,7 @@ size_t h2o_strtosize(const char *s, size_t len)
         int ch = *--p;
         if (!('0' <= ch && ch <= '9'))
             goto Error;
-        v += (ch - '0') * m;
+        v += (ch - '0') * m; //converts into unsigned int!
         if (p == s)
             break;
         m *= 10;
@@ -166,15 +166,15 @@ static uint32_t decode_base64url_quad(const char *src)
     return decoded;
 }
 
-h2o_iovec_t h2o_decode_base64url(h2o_mem_pool_t *pool, const char *src, size_t len)
+h2o_iovec_t  h2o_decode_base64url(h2o_mem_pool_t *pool, const char *src, size_t len)
 {
-    h2o_iovec_t decoded;
+    h2o_iovec_t  decoded;
     uint32_t t;
     uint8_t *dst;
     char remaining_input[4];
 
     decoded.len = len * 3 / 4;
-    decoded.base = pool != NULL ? h2o_mem_alloc_pool(pool, decoded.len + 1) : h2o_mem_alloc(decoded.len + 1);
+    decoded.base = h2o_mem_alloc_pool(pool, decoded.len + 1);
     dst = (uint8_t *)decoded.base;
 
     while (len >= 4) {
@@ -218,12 +218,10 @@ h2o_iovec_t h2o_decode_base64url(h2o_mem_pool_t *pool, const char *src, size_t l
     return decoded;
 
 Error:
-    if(pool == NULL)
-        free(decoded.base);
     return h2o_iovec_init(NULL, 0);
 }
 
-size_t h2o_base64_encode(char *_dst, const void *_src, size_t len, int url_encoded)
+void h2o_base64_encode(char *dst, const void *_src, size_t len, int url_encoded)
 {
     static const char *MAP = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                              "abcdefghijklmnopqrstuvwxyz"
@@ -232,7 +230,6 @@ size_t h2o_base64_encode(char *_dst, const void *_src, size_t len, int url_encod
                                          "abcdefghijklmnopqrstuvwxyz"
                                          "0123456789-_";
 
-    char *dst = _dst;
     const uint8_t *src = _src;
     const char *map = url_encoded ? MAP_URL_ENCODED : MAP;
     uint32_t quad;
@@ -263,90 +260,20 @@ size_t h2o_base64_encode(char *_dst, const void *_src, size_t len, int url_encod
     }
 
     *dst = '\0';
-    return dst - _dst;
 }
 
-static int decode_hex(int ch)
+const char *h2o_get_filext(const char *path, size_t len)
 {
-    if ('0' <= ch && ch <= '9')
-        return ch - '0';
-    if ('A' <= ch && ch <= 'F')
-        return ch - 'A' + 0xa;
-    if ('a' <= ch && ch <= 'f')
-        return ch - 'a' + 0xa;
-    return -1;
-}
-
-int h2o_hex_decode(void *_dst, const char *src, size_t src_len)
-{
-    unsigned char *dst = _dst;
-
-    if (src_len % 2 != 0)
-        return -1;
-    for (; src_len != 0; src_len -= 2) {
-        int hi, lo;
-        if ((hi = decode_hex(*src++)) == -1 || (lo = decode_hex(*src++)) == -1)
-            return -1;
-        *dst++ = (hi << 4) | lo;
-    }
-    return 0;
-}
-
-void h2o_hex_encode(char *dst, const void *_src, size_t src_len)
-{
-    const unsigned char *src = _src, *src_end = src + src_len;
-    for (; src != src_end; ++src) {
-        *dst++ = "0123456789abcdef"[*src >> 4];
-        *dst++ = "0123456789abcdef"[*src & 0xf];
-    }
-    *dst = '\0';
-}
-
-h2o_iovec_t h2o_uri_escape(h2o_mem_pool_t *pool, const char *s, size_t l, const char *preserve_chars)
-{
-    h2o_iovec_t encoded;
-    size_t i, capacity = l * 3 + 1;
-
-    encoded.base = pool != NULL ? h2o_mem_alloc_pool(pool, capacity) : h2o_mem_alloc(capacity);
-    encoded.len = 0;
-
-    /* RFC 3986:
-        path-noscheme = segment-nz-nc *( "/" segment )
-        segment-nz-nc = 1*( unreserved / pct-encoded / sub-delims / "@" )
-        unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~"
-        sub-delims    = "!" / "$" / "&" / "'" / "(" / ")"
-                     / "*" / "+" / "," / ";" / "="
-    */
-    for (i = 0; i != l; ++i) {
-        int ch = s[i];
-        if (ch >= 0x80 || ('A' <= ch && ch <= 'Z') || ('a' <= ch && ch <= 'z') || ('0' <= ch && ch <= '9') || ch == '-' ||
-            ch == '.' || ch == '_' || ch == '~' || ch == '!' || ch == '$' || ch == '&' || ch == '\'' || ch == '(' || ch == ')' ||
-            ch == '*' || ch == '+' || ch == ',' || ch == ';' || ch == '=' ||
-            (preserve_chars != NULL && strchr(preserve_chars, ch) != NULL)) {
-            encoded.base[encoded.len++] = ch;
-        } else {
-            encoded.base[encoded.len++] = '%';
-            encoded.base[encoded.len++] = "0123456789ABCDEF"[(ch >> 4) & 0xf];
-            encoded.base[encoded.len++] = "0123456789ABCDEF"[ch & 0xf];
-        }
-    }
-    encoded.base[encoded.len] = '\0';
-
-    return encoded;
-}
-
-h2o_iovec_t h2o_get_filext(const char *path, size_t len)
-{
-    const char *end = path + len, *p = end;
+    const char *p = path + len;
 
     while (--p != path) {
         if (*p == '.') {
-            return h2o_iovec_init(p + 1, end - (p + 1));
+            return p + 1;
         } else if (*p == '/') {
             break;
         }
     }
-    return h2o_iovec_init(NULL, 0);
+    return NULL;
 }
 
 static int is_ws(int ch)
@@ -354,7 +281,7 @@ static int is_ws(int ch)
     return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
 }
 
-h2o_iovec_t h2o_str_stripws(const char *s, size_t len)
+h2o_iovec_t  h2o_str_stripws(const char *s, size_t len)
 {
     const char *end = s + len;
 
@@ -375,7 +302,7 @@ size_t h2o_strstr(const char *haysack, size_t haysack_len, const char *needle, s
 {
     /* TODO optimize */
     if (haysack_len >= needle_len) {
-        size_t off, max = haysack_len - needle_len + 1;
+        size_t off, max = haysack_len - needle_len;
         if (needle_len == 0)
             return 0;
         for (off = 0; off != max; ++off)
@@ -386,7 +313,7 @@ size_t h2o_strstr(const char *haysack, size_t haysack_len, const char *needle, s
 }
 
 /* note: returns a zero-width match as well */
-const char *h2o_next_token(h2o_iovec_t *iter, int separator, size_t *element_len, h2o_iovec_t *value)
+const char *h2o_next_token(h2o_iovec_t  *iter, int separator, size_t *element_len, h2o_iovec_t  *value)
 {
     const char *cur = iter->base, *end = iter->base + iter->len, *token_start, *token_end;
 
@@ -419,21 +346,25 @@ const char *h2o_next_token(h2o_iovec_t *iter, int separator, size_t *element_len
     /* found */
     *iter = h2o_iovec_init(cur, end - cur);
     *element_len = token_end - token_start;
-    if (value != NULL)
-        *value = (h2o_iovec_t){};
+	if (value != NULL)
+	{//Did this because that constructor is not supported by visual studio as such
+		h2o_iovec_t  temp = {0};
+		*value = temp;
+		//*value = (st_st_h2o_iovec_t ){};
+	}
     return token_start;
 
 FindValue:
     *iter = h2o_iovec_init(cur, end - cur);
     *element_len = token_end - token_start;
     if ((value->base = (char *)h2o_next_token(iter, separator, &value->len, NULL)) == NULL)
-        *value = (h2o_iovec_t){"", 0};
+        *value = (h2o_iovec_t ){"", 0};
     return token_start;
 }
 
 int h2o_contains_token(const char *haysack, size_t haysack_len, const char *needle, size_t needle_len, int separator)
 {
-    h2o_iovec_t iter = h2o_iovec_init(haysack, haysack_len);
+    h2o_iovec_t  iter = h2o_iovec_init(haysack, haysack_len);
     const char *token = NULL;
     size_t token_len = 0;
 
@@ -445,7 +376,7 @@ int h2o_contains_token(const char *haysack, size_t haysack_len, const char *need
     return 0;
 }
 
-h2o_iovec_t h2o_htmlescape(h2o_mem_pool_t *pool, const char *src, size_t len)
+h2o_iovec_t  h2o_htmlescape(h2o_mem_pool_t *pool, const char *src, size_t len)
 {
     const char *s, *end = src + len;
     size_t add_size = 0;
@@ -473,7 +404,7 @@ h2o_iovec_t h2o_htmlescape(h2o_mem_pool_t *pool, const char *src, size_t len)
     /* escape and return the result if necessary */
     if (add_size != 0) {
         /* allocate buffer and fill in the chars that are known not to require escaping */
-        h2o_iovec_t escaped = {h2o_mem_alloc_pool(pool, len + add_size + 1), 0};
+        h2o_iovec_t  escaped = {h2o_mem_alloc_pool(pool, len + add_size + 1), 0};
         /* fill-in the rest */
         for (s = src; s != end; ++s) {
             switch (*s) {
@@ -501,9 +432,9 @@ h2o_iovec_t h2o_htmlescape(h2o_mem_pool_t *pool, const char *src, size_t len)
     return h2o_iovec_init(src, len);
 }
 
-h2o_iovec_t h2o_concat_list(h2o_mem_pool_t *pool, h2o_iovec_t *list, size_t count)
+h2o_iovec_t  h2o_concat_list(h2o_mem_pool_t *pool, h2o_iovec_t  *list, size_t count)
 {
-    h2o_iovec_t ret = {NULL, 0};
+    h2o_iovec_t  ret = {NULL, 0};
     size_t i;
 
     /* calc the length */
@@ -526,43 +457,4 @@ h2o_iovec_t h2o_concat_list(h2o_mem_pool_t *pool, h2o_iovec_t *list, size_t coun
     ret.base[ret.len] = '\0';
 
     return ret;
-}
-
-int h2o_str_at_position(char *buf, const char *src, size_t src_len, int lineno, int column)
-{
-    const char *src_end = src + src_len;
-    int i;
-
-    /* find the line */
-    if (lineno <= 0 || column <= 0)
-        return -1;
-    for (--lineno; lineno != 0; --lineno) {
-        do {
-            if (src == src_end)
-                return -1;
-        } while (*src++ != '\n');
-    }
-
-    /* adjust the starting column */
-    while (column > 40) {
-        if (src != src_end)
-            ++src;
-        --column;
-    }
-
-    /* emit */
-    for (i = 1; i <= 76; ++i) {
-        if (src == src_end || *src == '\n')
-            break;
-        *buf++ = *src++;
-    }
-    if (i < column)
-        column = i;
-    *buf++ = '\n';
-    for (i = 1; i < column; ++i)
-        *buf++ = ' ';
-    *buf++ = '^';
-    *buf++ = '\n';
-    *buf = '\0';
-    return 0;
 }

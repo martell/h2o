@@ -79,7 +79,7 @@ int done_testing(void)
 
 void subtest(const char *name, void (*cb)(void))
 {
-    struct test_t test = {}, *parent_tests;
+    struct test_t test = {0}, *parent_tests;
 
     parent_tests = cur_tests;
     cur_tests = &test;

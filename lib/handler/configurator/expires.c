@@ -21,9 +21,19 @@
  */
 #include <inttypes.h>
 #include <stdio.h>
-#include <string.h>
+#include <string.h> //strcasecmp : posix.
 #include "h2o.h"
 #include "h2o/configurator.h"
+
+
+//string function related mappings
+#if defined _WIN32
+#define snprintf _snprintf
+#define vsnprintf _vsnprintf
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+#endif
+
 
 struct expires_configurator_t {
     h2o_configurator_t super;
@@ -56,7 +66,7 @@ static int on_config_expires(h2o_configurator_command_t *cmd, h2o_configurator_c
             value *= 365 * 30 * 60 * 60;
         } else {
             /* TODO add support for H2O_EXPIRES_MODE_MAX_ABSOLUTE that sets the Expires header? */
-            h2o_configurator_errprintf(cmd, node, "unknown unit:`%s` (see --help)", unit);
+            //h2o_configurator_errprintf(cmd, node, "unknown unit:`%s` (see --help)", unit);
             return -1;
         }
         /* save the value */
@@ -65,8 +75,8 @@ static int on_config_expires(h2o_configurator_command_t *cmd, h2o_configurator_c
         (*self->args)->mode = H2O_EXPIRES_MODE_MAX_AGE;
         (*self->args)->data.max_age = value;
     } else {
-        h2o_configurator_errprintf(cmd, node,
-                                   "failed to parse the value, should be in form of: `<number> <unit>` or `OFF` (see --help)");
+		//--h2o_configurator_errprintf(cmd, node,
+                                //   "failed to parse the value, should be in form of: `<number> <unit>` or `OFF` (see --help)");
         return -1;
     }
 

@@ -19,17 +19,28 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/un.h>
+#ifdef _WIN32
+# include <ws2tcpip.h>
+# ifndef AI_ADDRCONFIG
+#  define AI_ADDRCONFIG 0
+# endif
+# ifndef AI_NUMERICSERV
+#  define AI_NUMERICSERV 8
+# endif
+#else
+# include <arpa/inet.h>
+# include <netdb.h>
+# include <netinet/in.h>
+# include <sys/socket.h>
+# include <sys/types.h>
+# include<sys/un.h> 
+#endif
+
 #include "picohttpparser.h"
 #include "h2o/string_.h"
 #include "h2o/hostinfo.h"
 #include "h2o/http1client.h"
-#include "h2o/url.h"
+#include "h2o/url.h" //why their basic mingw version doesn't includes this?
 
 struct st_h2o_http1client_private_t {
     h2o_http1client_t super;
@@ -108,6 +119,7 @@ static void on_body_until_close(h2o_socket_t *sock, int status)
             close_client(client);
             return;
         }
+        h2o_buffer_consume(&sock->input, sock->input->size);
     }
 
     h2o_timeout_link(client->super.ctx->loop, client->super.ctx->io_timeout, &client->_timeout);
@@ -314,7 +326,7 @@ static void on_send_request(h2o_socket_t *sock, int status)
 
     if (status != 0) {
         on_error_before_head(client, "I/O error (send request)");
-        return;
+		return;
     }
 
     h2o_socket_read_start(client->super.sock, on_head);
@@ -338,12 +350,11 @@ static void on_connect_error(struct st_h2o_http1client_private_t *client, const 
 static void on_connect(h2o_socket_t *sock, int status)
 {
     struct st_h2o_http1client_private_t *client = sock->data;
-    h2o_iovec_t *reqbufs;
+    h2o_iovec_t  *reqbufs;
     size_t reqbufcnt;
 
     h2o_timeout_unlink(&client->_timeout);
-
-    if (status != 0) {
+	if (status != 0) {
         on_connect_error(client, "connection failed");
         return;
     }
@@ -425,7 +436,7 @@ static struct st_h2o_http1client_private_t *create_client(h2o_http1client_t **_c
 
 const char *const h2o_http1client_error_is_eos = "end of stream";
 
-void h2o_http1client_connect(h2o_http1client_t **_client, void *data, h2o_http1client_ctx_t *ctx, h2o_iovec_t host, uint16_t port,
+void h2o_http1client_connect(h2o_http1client_t **_client, void *data, h2o_http1client_ctx_t *ctx, h2o_iovec_t  host, uint16_t port,
                              h2o_http1client_connect_cb cb)
 {
     struct st_h2o_http1client_private_t *client;
@@ -436,30 +447,20 @@ void h2o_http1client_connect(h2o_http1client_t **_client, void *data, h2o_http1c
     client->_timeout.cb = on_connect_timeout;
     h2o_timeout_link(ctx->loop, ctx->io_timeout, &client->_timeout);
 
-    { /* directly call connect(2) if `host` is an IP address */
-        struct sockaddr_in sin = {};
-        if (h2o_hostinfo_aton(host, &sin.sin_addr) == 0) {
-            sin.sin_family = AF_INET;
-            sin.sin_port = htons(port);
-            start_connect(client, (void *)&sin, sizeof(sin));
-            return;
-        }
-    }
-    { /* directly call connect(2) if `host` refers to an UNIX-domain socket */
-        struct sockaddr_un sa;
-        const char *to_sa_err;
-        if ((to_sa_err = h2o_url_host_to_sun(host, &sa)) != h2o_url_host_to_sun_err_is_not_unix_socket) {
-            if (to_sa_err != NULL) {
-                on_connect_error(client, to_sa_err);
-                return;
-            }
-            start_connect(client, (void *)&sa, sizeof(sa));
-            return;
-        }
+    /* directly call connect(2) if `host` is an IP address */
+    //struct sockaddr_in sin = {};
+	struct sockaddr_in sin = {0};
+
+
+	if (h2o_hostinfo_aton(host, &sin.sin_addr) == 0) {
+        sin.sin_family = AF_INET;
+        sin.sin_port = htons(port);
+        start_connect(client, (void *)&sin, sizeof(sin));
+        return;
     }
     /* resolve destination and then connect */
     client->_getaddr_req =
-        h2o_hostinfo_getaddr(ctx->getaddr_receiver, host, h2o_iovec_init(serv, sprintf(serv, "%u", (unsigned)port)), AF_UNSPEC,
+        h2o_hostinfo_getaddr(ctx->getaddr_receiver, host, h2o_iovec_init(serv, sprintf(serv,"%u", (unsigned)port)), AF_UNSPEC,
                              SOCK_STREAM, IPPROTO_TCP, AI_ADDRCONFIG | AI_NUMERICSERV, on_getaddr, client);
 }
 
@@ -467,6 +468,7 @@ void h2o_http1client_connect_with_pool(h2o_http1client_t **_client, void *data, 
                                        h2o_socketpool_t *sockpool, h2o_http1client_connect_cb cb)
 {
     struct st_h2o_http1client_private_t *client = create_client(_client, data, ctx, cb);
+
     client->super.sockpool.pool = sockpool;
     client->_timeout.cb = on_connect_timeout;
     h2o_timeout_link(ctx->loop, ctx->io_timeout, &client->_timeout);
@@ -481,11 +483,4 @@ void h2o_http1client_cancel(h2o_http1client_t *_client)
     close_client(client);
 }
 
-h2o_socket_t *h2o_http1client_steal_socket(h2o_http1client_t *_client)
-{
-    struct st_h2o_http1client_private_t *client = (void *)_client;
-    h2o_socket_t *sock = client->super.sock;
-    h2o_socket_read_stop(sock);
-    client->super.sock = NULL;
-    return sock;
-}
+//A new definition missing called steal_socket from latest repo.

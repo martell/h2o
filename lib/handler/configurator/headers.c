@@ -28,9 +28,9 @@ struct headers_configurator_t {
     H2O_VECTOR(h2o_headers_command_t) * cmds, _cmd_stack[H2O_CONFIGURATOR_NUM_LEVELS + 1];
 };
 
-static int extract_name(const char *src, size_t len, h2o_iovec_t **_name)
+static int extract_name(const char *src, size_t len, h2o_iovec_t  **_name)
 {
-    h2o_iovec_t name;
+    h2o_iovec_t  name;
     const h2o_token_t *name_token;
 
     name = h2o_str_stripws(src, len);
@@ -41,7 +41,7 @@ static int extract_name(const char *src, size_t len, h2o_iovec_t **_name)
     h2o_strtolower(name.base, name.len);
 
     if ((name_token = h2o_lookup_token(name.base, name.len)) != NULL) {
-        *_name = (h2o_iovec_t *)&name_token->buf;
+        *_name = (h2o_iovec_t  *)&name_token->buf;
         free(name.base);
     } else {
         *_name = h2o_mem_alloc(sizeof(**_name));
@@ -51,7 +51,7 @@ static int extract_name(const char *src, size_t len, h2o_iovec_t **_name)
     return 0;
 }
 
-static int extract_name_value(const char *src, h2o_iovec_t **name, h2o_iovec_t *value)
+static int extract_name_value(const char *src, h2o_iovec_t  **name, h2o_iovec_t  *value)
 {
     const char *colon = strchr(src, ':');
 
@@ -66,37 +66,33 @@ static int extract_name_value(const char *src, h2o_iovec_t **name, h2o_iovec_t *
     return 0;
 }
 
-static int add_cmd(h2o_configurator_command_t *cmd, yoml_t *node, int cmd_id, h2o_iovec_t *name, h2o_iovec_t value)
+static int add_cmd(h2o_configurator_command_t *cmd, yoml_t *node, int cmd_id, h2o_iovec_t  *name, h2o_iovec_t  value)
 {
     struct headers_configurator_t *self = (void *)cmd->configurator;
 
     if (h2o_iovec_is_token(name)) {
         const h2o_token_t *token = (void *)name;
         if (h2o_headers_is_prohibited_name(token)) {
-            h2o_configurator_errprintf(cmd, node, "the named header cannot be rewritten");
+            //h2o_configurator_errprintf(cmd, node, "the named header cannot be rewritten");
             return -1;
         }
     }
 
-    h2o_vector_reserve(NULL, self->cmds, self->cmds->size + 1);
+    h2o_vector_reserve(NULL, (h2o_vector_t *)self->cmds, sizeof(self->cmds->entries[0]), self->cmds->size + 1);
     self->cmds->entries[self->cmds->size++] = (h2o_headers_command_t){cmd_id, name, value};
     return 0;
 }
 
 static int on_config_header_2arg(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, int cmd_id, yoml_t *node)
 {
-    h2o_iovec_t *name, value;
+    h2o_iovec_t  *name, value;
 
     if (extract_name_value(node->data.scalar, &name, &value) != 0) {
-        h2o_configurator_errprintf(cmd, node, "failed to parse the value; should be in form of `name: value`");
+        //h2o_configurator_errprintf(cmd, node, "failed to parse the value; should be in form of `name: value`");
         return -1;
     }
-    if (add_cmd(cmd, node, cmd_id, name, value) != 0) {
-        if (!h2o_iovec_is_token(name))
-            free(name->base);
-        free(value.base);
+    if (add_cmd(cmd, node, cmd_id, name, value) != 0)
         return -1;
-    }
     return 0;
 }
 
@@ -116,17 +112,15 @@ DEFINE_2ARG(on_config_header_setifempty, H2O_HEADERS_CMD_SETIFEMPTY)
 
 static int on_config_header_unset(h2o_configurator_command_t *cmd, h2o_configurator_context_t *ctx, yoml_t *node)
 {
-    h2o_iovec_t *name;
+    h2o_iovec_t  *name;
+	h2o_iovec_t temp = {0};
 
     if (extract_name(node->data.scalar, strlen(node->data.scalar), &name) != 0) {
-        h2o_configurator_errprintf(cmd, node, "invalid header name");
+        //h2o_configurator_errprintf(cmd, node, "invalid header name");
         return -1;
     }
-    if (add_cmd(cmd, node, H2O_HEADERS_CMD_UNSET, name, (h2o_iovec_t){}) != 0) {
-        if (!h2o_iovec_is_token(name))
-            free(name->base);
+    if (add_cmd(cmd, node, H2O_HEADERS_CMD_UNSET, name, temp) != 0) //Empty initialization(h2o_iovec_t ){}) != 0)
         return -1;
-    }
     return 0;
 }
 
@@ -134,7 +128,7 @@ static int on_config_enter(h2o_configurator_t *_self, h2o_configurator_context_t
 {
     struct headers_configurator_t *self = (void *)_self;
 
-    h2o_vector_reserve(NULL, &self->cmds[1], self->cmds[0].size);
+    h2o_vector_reserve(NULL, (h2o_vector_t *)&self->cmds[1], sizeof(self->cmds[0].entries[0]), self->cmds[0].size);
     memcpy(self->cmds[1].entries, self->cmds[0].entries, sizeof(self->cmds->entries[0]) * self->cmds->size);
     self->cmds[1].size = self->cmds[0].size;
     ++self->cmds;
@@ -146,7 +140,7 @@ static int on_config_exit(h2o_configurator_t *_self, h2o_configurator_context_t 
     struct headers_configurator_t *self = (void *)_self;
 
     if (ctx->pathconf != NULL && self->cmds->size != 0) {
-        h2o_vector_reserve(NULL, self->cmds, self->cmds->size + 1);
+        h2o_vector_reserve(NULL, (h2o_vector_t *)self->cmds, sizeof(self->cmds->entries[0]), self->cmds->size + 1);
         self->cmds->entries[self->cmds->size] = (h2o_headers_command_t){H2O_HEADERS_CMD_NULL};
         h2o_headers_register(ctx->pathconf, self->cmds->entries);
     } else {

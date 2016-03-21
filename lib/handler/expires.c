@@ -22,13 +22,13 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
-#include <stdlib.h>
+//#include <stdlib.h>
 #include "h2o.h"
 
 struct st_expires_t {
     h2o_filter_t super;
     int mode;
-    h2o_iovec_t value;
+    h2o_iovec_t  value;
 };
 
 static void on_setup_ostream(h2o_filter_t *_self, h2o_req_t *req, h2o_ostream_t **slot)
@@ -50,7 +50,7 @@ static void on_setup_ostream(h2o_filter_t *_self, h2o_req_t *req, h2o_ostream_t 
             h2o_set_header(&req->pool, &req->res.headers, H2O_TOKEN_EXPIRES, self->value.base, self->value.len, 0);
             break;
         case H2O_EXPIRES_MODE_MAX_AGE:
-            h2o_set_header_token(&req->pool, &req->res.headers, H2O_TOKEN_CACHE_CONTROL, self->value.base, self->value.len);
+            h2o_add_header_token(&req->pool, &req->res.headers, H2O_TOKEN_CACHE_CONTROL, self->value.base, self->value.len);
             break;
         default:
             assert(0);
@@ -61,7 +61,7 @@ static void on_setup_ostream(h2o_filter_t *_self, h2o_req_t *req, h2o_ostream_t 
         break;
     }
 
-    h2o_setup_next_ostream(req, slot);
+    h2o_setup_next_ostream(&self->super, req, slot);
 }
 
 void h2o_expires_register(h2o_pathconf_t *pathconf, h2o_expires_args_t *args)
@@ -75,7 +75,7 @@ void h2o_expires_register(h2o_pathconf_t *pathconf, h2o_expires_args_t *args)
         break;
     case H2O_EXPIRES_MODE_MAX_AGE:
         self->value.base = h2o_mem_alloc(128);
-        self->value.len = sprintf(self->value.base, "max-age=%" PRIu64, args->data.max_age);
+        self->value.len = sprintf(self->value.base,"max-age=%" PRIu64, args->data.max_age);
         break;
     default:
         assert(0);

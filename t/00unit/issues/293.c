@@ -25,15 +25,15 @@
 
 static h2o_context_t ctx;
 
-static void register_authority(h2o_globalconf_t *globalconf, h2o_iovec_t host, uint16_t port)
+static void register_authority(h2o_globalconf_t *globalconf, h2o_iovec_t  host, uint16_t port)
 {
-    static h2o_iovec_t x_authority = {H2O_STRLIT("x-authority")};
+    static h2o_iovec_t  x_authority = {H2O_STRLIT("x-authority")};
 
     h2o_hostconf_t *hostconf = h2o_config_register_host(globalconf, host, port);
-    h2o_pathconf_t *pathconf = h2o_config_register_path(hostconf, "/", 0);
+    h2o_pathconf_t *pathconf = h2o_config_register_path(hostconf, "/");
     h2o_file_register(pathconf, "t/00unit/assets", NULL, NULL, 0);
 
-    char *authority = h2o_mem_alloc(host.len + sizeof(":" H2O_UINT16_LONGEST_STR));
+    char *authority = h2o_mem_alloc(host.len + sizeof(":65535"));
     sprintf(authority, "%.*s:%" PRIu16, (int)host.len, host.base, port);
     h2o_headers_command_t *cmds = h2o_mem_alloc(sizeof(*cmds) * 2);
     cmds[0] = (h2o_headers_command_t){H2O_HEADERS_CMD_ADD, &x_authority, {authority, strlen(authority)}};
@@ -56,8 +56,7 @@ static void check(const h2o_url_scheme_t *scheme, const char *host, const char *
     ok(index != SIZE_MAX);
 
     if (index != SIZE_MAX) {
-        ok(h2o_memis(conn->req.res.headers.entries[index].value.base, conn->req.res.headers.entries[index].value.len, expected,
-                     strlen(expected)));
+        ok(h2o_memis(conn->req.res.headers.entries[index].value.base, conn->req.res.headers.entries[index].value.len, expected, strlen(expected)));
     }
 
     h2o_loopback_destroy(conn);

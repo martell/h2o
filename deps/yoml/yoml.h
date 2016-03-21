@@ -29,7 +29,12 @@ extern "C" {
 #include <stdlib.h>
 #include <string.h>
 
-typedef enum enum_yoml_type_t { YOML_TYPE_SCALAR, YOML_TYPE_SEQUENCE, YOML_TYPE_MAPPING, YOML__TYPE_UNRESOLVED_ALIAS } yoml_type_t;
+typedef enum enum_yoml_type_t {
+    YOML_TYPE_SCALAR,
+    YOML_TYPE_SEQUENCE,
+    YOML_TYPE_MAPPING,
+    YOML__TYPE_UNRESOLVED_ALIAS
+} yoml_type_t;
 
 typedef struct st_yoml_t yoml_t;
 
@@ -63,7 +68,7 @@ struct st_yoml_t {
     } data;
 };
 
-static inline void yoml_free(yoml_t *node, void *(*mem_set)(void *, int, size_t))
+static inline void yoml_free(yoml_t *node)
 {
     size_t i;
 
@@ -75,19 +80,17 @@ static inline void yoml_free(yoml_t *node, void *(*mem_set)(void *, int, size_t)
         free(node->anchor);
         switch (node->type) {
         case YOML_TYPE_SCALAR:
-            if (mem_set != NULL)
-                mem_set(node->data.scalar, 0, strlen(node->data.scalar));
             free(node->data.scalar);
             break;
         case YOML_TYPE_SEQUENCE:
             for (i = 0; i != node->data.sequence.size; ++i) {
-                yoml_free(node->data.sequence.elements[i], mem_set);
+                yoml_free(node->data.sequence.elements[i]);
             }
             break;
         case YOML_TYPE_MAPPING:
             for (i = 0; i != node->data.mapping.size; ++i) {
-                yoml_free(node->data.mapping.elements[i].key, mem_set);
-                yoml_free(node->data.mapping.elements[i].value, mem_set);
+                yoml_free(node->data.mapping.elements[i].key);
+                yoml_free(node->data.mapping.elements[i].value);
             }
             break;
         case YOML__TYPE_UNRESOLVED_ALIAS:
@@ -114,8 +117,8 @@ static inline yoml_t *yoml_find_anchor(yoml_t *node, const char *name)
         break;
     case YOML_TYPE_MAPPING:
         for (i = 0; i != node->data.mapping.size; ++i)
-            if ((n = yoml_find_anchor(node->data.mapping.elements[i].key, name)) != NULL ||
-                (n = yoml_find_anchor(node->data.mapping.elements[i].value, name)) != NULL)
+            if ((n = yoml_find_anchor(node->data.mapping.elements[i].key, name)) != NULL
+                || (n = yoml_find_anchor(node->data.mapping.elements[i].value, name)) != NULL)
                 return n;
         break;
     default:

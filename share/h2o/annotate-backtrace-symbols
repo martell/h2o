@@ -1,5 +1,5 @@
 #! /bin/sh
-exec ${H2O_PERL:-perl} -x $0 "$@"
+exec perl -x $0 "$@"
 #! perl
 
 use strict;

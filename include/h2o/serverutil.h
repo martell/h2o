@@ -23,6 +23,7 @@
 #define h2o__server_starter_h
 
 #include <stddef.h>
+//#include <pwd.h> (alternatives?)
 
 /* taken from sysexits.h */
 #ifndef EX_SOFTWARE
@@ -38,6 +39,9 @@
 #define EX_CONFIG 78
 #endif
 
+//process Id can be interchangeable with handle ;)
+typedef unsigned int pid_t;
+
 /**
  * equivalent of signal(3)
  */
@@ -46,7 +50,7 @@ void h2o_set_signal_handler(int signo, void (*cb)(int signo));
 /**
  * equiv. to setuidgid of djb
  */
-int h2o_setuidgid(const char *user);
+int h2o_setuidgid(struct passwd *passwd);
 
 /**
  * return a list of fds passed in from Server::Starter, or 0 if Server::Starter was not used.  -1 on error
@@ -62,7 +66,7 @@ size_t h2o_server_starter_get_fds(int **_fds);
  *        pair is not -1.  If the second value is -1, then `close` is called with the first value as the argument.
  * @return pid of the process being spawned if successful, or -1 if otherwise
  */
-pid_t h2o_spawnp(const char *cmd, char *const *argv, const int *mapped_fds, int clocexec_mutex_is_locked);
+pid_t h2o_spawnp(const char *cmd, char **argv, const int *mapped_fds, int clocexec_mutex_is_locked);
 
 /**
  * executes a command and returns its output

@@ -19,9 +19,10 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#include <stdlib.h>
+////#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <WinSock2.h>
 #include <openssl/sha.h>
 #include "h2o/websocket.h"
 
@@ -85,7 +86,7 @@ static ssize_t recv_callback(wslay_event_context_ptr ctx, uint8_t *buf, size_t l
 static ssize_t send_callback(wslay_event_context_ptr ctx, const uint8_t *data, size_t len, int flags, void *_conn)
 {
     h2o_websocket_conn_t *conn = _conn;
-    h2o_iovec_t buf;
+    h2o_iovec_t  buf;
 
     /* return WOULDBLOCK if pending (TODO: queue fixed number of chunks, instead of only one) */
     if (h2o_socket_is_writing(conn->sock)) {

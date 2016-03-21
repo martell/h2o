@@ -22,31 +22,42 @@
 #ifndef h2o__hostinfo_h
 #define h2o__hostinfo_h
 
+#if (_MSC_VER)
+//#include <winsock2.h> will pick it from multithread.h ==> It doesn't since hostinfo.c funciton getaddrinfo links backs to pthread instead of socket library.
+
+#include<winsock2.h>
+#include<ws2tcpip.h>
+#pragma comment(lib, "Ws2_32.lib")
+
+#else
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/socket.h>
-#include <sys/types.h>
+#endif
+
 #include "h2o/multithread.h"
+#include <sys/types.h>
+#include <string.h>
+#include <stdlib.h>
 
-typedef struct st_h2o_hostinfo_getaddr_req_t h2o_hostinfo_getaddr_req_t;
 
-typedef void (*h2o_hostinfo_getaddr_cb)(h2o_hostinfo_getaddr_req_t *req, const char *errstr, struct addrinfo *res, void *cbdata);
+typedef struct st_h2o_hostinfo_getaddr_req_t h2o_hostinfo_getaddr_req_t; //definition in hostinfo.c 
+
+typedef void (*h2o_hostinfo_getaddr_cb) (h2o_hostinfo_getaddr_req_t *req, const char *errstr, struct addrinfo *res, void *cbdata);
 
 extern size_t h2o_hostinfo_max_threads;
 
 /**
  * dispatches a (possibly) asynchronous hostname lookup
  */
-h2o_hostinfo_getaddr_req_t *h2o_hostinfo_getaddr(h2o_multithread_receiver_t *receiver, h2o_iovec_t name, h2o_iovec_t serv,
-                                                 int family, int socktype, int protocol, int flags, h2o_hostinfo_getaddr_cb cb,
+h2o_hostinfo_getaddr_req_t *h2o_hostinfo_getaddr(h2o_multithread_receiver_t *receiver, h2o_iovec_t  name, h2o_iovec_t  serv,
+                                                 int family, int socktype, int protocol, int flags, struct h2o_hostinfo_getaddr_cb *cb,
                                                  void *cbdata);
 /**
  *
  */
-void h2o__hostinfo_getaddr_dispatch(h2o_hostinfo_getaddr_req_t *req);
+void h2o__hostinfo_getaddr_dispatch(struct h2o_hostinfo_getaddr_req_t *req);
 /**
  * cancels the request
  */
@@ -65,11 +76,11 @@ static struct addrinfo *h2o_hostinfo_select_one(struct addrinfo *res);
 /**
  * equiv. to inet_pton(AF_INET4)
  */
-int h2o_hostinfo_aton(h2o_iovec_t host, struct in_addr *addr);
+int h2o_hostinfo_aton(h2o_iovec_t  host, struct in_addr *addr);
 
 /* inline defs */
 
-inline struct addrinfo *h2o_hostinfo_select_one(struct addrinfo *res)
+_inline struct addrinfo *h2o_hostinfo_select_one(struct addrinfo *res)
 {
     if (res->ai_next == NULL)
         return res;

@@ -127,4 +127,37 @@ inline h2o_http2_scheduler_node_t *h2o_http2_scheduler_get_parent(h2o_http2_sche
     return ref->node._parent;
 }
 
+#if defined _WIN32
+#include <intrin.h>
+uint32_t __inline __builtin_ctz(uint32_t value)
+{
+	DWORD trailing_zero = 0;
+
+	if (_BitScanForward(&trailing_zero, value))
+	{
+		return trailing_zero;
+	}
+	else
+	{
+		// This is undefined, I better choose 32 than 0
+		return 32;
+	}
+}
+
+uint32_t __inline __builtin_clz(uint32_t value)
+{
+	DWORD leading_zero = 0;
+
+	if (_BitScanReverse(&leading_zero, value))
+	{
+		return 31 - leading_zero;
+	}
+	else
+	{
+		// Same remarks as above
+		return 32;
+	}
+}
+#endif
+
 #endif

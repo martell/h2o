@@ -19,7 +19,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#include <stdlib.h>
+//#include <stdlib.h>
 #include "h2o.h"
 
 #define MODULE_NAME "lib/handler/redirect.c"
@@ -28,7 +28,7 @@ struct st_h2o_redirect_handler_t {
     h2o_handler_t super;
     int internal;
     int status;
-    h2o_iovec_t prefix;
+    h2o_iovec_t  prefix;
 };
 
 static void on_dispose(h2o_handler_t *_self)
@@ -37,14 +37,15 @@ static void on_dispose(h2o_handler_t *_self)
     free(self->prefix.base);
 }
 
-static void redirect_internally(h2o_redirect_handler_t *self, h2o_req_t *req, h2o_iovec_t dest)
+static void redirect_internally(h2o_redirect_handler_t *self, h2o_req_t *req, h2o_iovec_t  dest)
 {
-    h2o_iovec_t method;
+    h2o_iovec_t  method;
     h2o_url_t input, resolved;
 
     /* resolve the URL */
     if (h2o_url_parse_relative(dest.base, dest.len, &input) != 0) {
-        h2o_req_log_error(req, MODULE_NAME, "invalid destination:%.*s", (int)dest.len, dest.base);
+        //Undefined problem
+		//h2o_req_log_error(req, MODULE_NAME, "invalid destination:%.*s", (int)dest.len, dest.base);
         goto SendInternalError;
     }
     if (input.scheme != NULL && input.authority.base != NULL) {
@@ -53,8 +54,8 @@ static void redirect_internally(h2o_redirect_handler_t *self, h2o_req_t *req, h2
         h2o_url_t base;
         /* we MUST to set authority to that of hostconf, or internal redirect might create a TCP connection */
         if (h2o_url_init(&base, req->scheme, req->hostconf->authority.hostport, req->path) != 0) {
-            h2o_req_log_error(req, MODULE_NAME, "failed to parse current authority:%.*s", (int)req->authority.len,
-                              req->authority.base);
+            //h2o_req_log_error(req, MODULE_NAME, "failed to parse current authority:%.*s", (int)req->authority.len,
+                              //req->authority.base);
             goto SendInternalError;
         }
         h2o_url_resolve(&req->pool, &base, &input, &resolved);
@@ -68,7 +69,6 @@ static void redirect_internally(h2o_redirect_handler_t *self, h2o_req_t *req, h2
         break;
     default:
         method = h2o_iovec_init(H2O_STRLIT("GET"));
-        req->entity = (h2o_iovec_t){};
         break;
     }
 
@@ -82,9 +82,14 @@ SendInternalError:
 static int on_req(h2o_handler_t *_self, h2o_req_t *req)
 {
     h2o_redirect_handler_t *self = (void *)_self;
-    h2o_iovec_t dest = h2o_build_destination(req, self->prefix.base, self->prefix.len);
 
-    /* redirect */
+    /* build the URL */
+    h2o_iovec_t  path =
+        h2o_iovec_init(req->path_normalized.base + req->pathconf->path.len, req->path_normalized.len - req->pathconf->path.len);
+    h2o_iovec_t  query = req->query_at != SIZE_MAX ? h2o_iovec_init(req->path.base + req->query_at, req->path.len - req->query_at)
+                                                  : h2o_iovec_init(H2O_STRLIT(""));
+    h2o_iovec_t  dest = h2o_concat(&req->pool, self->prefix, path, query);
+
     if (self->internal) {
         redirect_internally(self, req, dest);
     } else {

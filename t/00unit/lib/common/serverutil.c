@@ -19,16 +19,42 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
+#ifndef _WIN32
 #include <stdlib.h>
+#endif
 #include "../../test.h"
 #include "../../../../lib/common/serverutil.c"
+
+// setenv replacement
+#ifdef _WIN32
+
+int setenv(const char *name, const char *value, int overwrite)
+{
+	int errcode = 0;
+	if (!overwrite) {
+		size_t envsize = 0;
+		errcode = getenv_s(&envsize, NULL, 0, name);
+		if (errcode || envsize) return errcode;
+	}
+	return _putenv_s(name, value);
+}
+
+// Not present in windows
+#define WEXITSTATUS(w) (w)
+#define WIFEXITED(w) (true)
+
+#endif //WIN32
 
 static void test_server_starter(void)
 {
     int *fds;
     size_t num_fds;
+#ifdef _WIN32
+	putenv("SERVER_STARTER_PORT="); //--Should delete the environment variable.
+#else
+	unsetenv("SERVER_STARTER_PORT");
+#endif
 
-    unsetenv("SERVER_STARTER_PORT");
     num_fds = h2o_server_starter_get_fds(&fds);
     ok(num_fds == 0);
 
@@ -43,6 +69,7 @@ static void test_server_starter(void)
     ok(fds[0] == 3);
     ok(fds[1] == 4);
 
+	//Issue here num_fds = h2o_server_starter_get_fds() yields invalid file descriptors?
     setenv("SERVER_STARTER_PORT", "0.0.0.0:80=foo", 1);
     num_fds = h2o_server_starter_get_fds(&fds);
     ok(num_fds == SIZE_MAX);
@@ -80,8 +107,12 @@ static void test_read_command(void)
         ok(h2o_memis(resp->bytes, resp->size, H2O_STRLIT("hello")));
         h2o_buffer_dispose(&resp);
     }
-    unsetenv("READ_COMMAND_EXIT_STATUS");
-
+#ifdef _WIN32
+	putenv("READ_COMMAND_EXIT_STATUS=");
+#else
+	unsetenv("READ_COMMAND_EXIT_STATUS");
+#endif
+    
     /* command not an executable */
     argv[0] = "t/00unit/assets";
     ret = h2o_read_command(argv[0], argv, &resp, &status);

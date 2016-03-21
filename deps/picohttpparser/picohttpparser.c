@@ -32,6 +32,10 @@
 #endif
 #include "picohttpparser.h"
 
+#if defined(_MSC_VER)
+#include <nmmintrin.h>
+#endif
+
 /* $Id$ */
 
 #if __GNUC__ >= 3
@@ -59,7 +63,7 @@
 
 #define ADVANCE_TOKEN(tok, toklen) do { \
     const char* tok_start = buf; \
-    static const char ranges2[] __attribute__((aligned(16))) = "\000\040\177\177"; \
+    static const char ranges2[]  = "\000\040\177\177"; \
     int found2; \
     buf = findchar_fast(buf, buf_end, ranges2, sizeof(ranges2) - 1, &found2); \
     if (! found2) { \
@@ -263,7 +267,7 @@ static const char* parse_headers(const char* buf, const char* buf_end,
       /* parsing name, but do not discard SP before colon, see
        * http://www.mozilla.org/security/announce/2006/mfsa2006-33.html */
       headers[*num_headers].name = buf;
-      static const char ranges1[] __attribute__((aligned(16))) = "::\x00\037";
+      static const char ranges1[] = "::\x00\037";
       int found;
       buf = findchar_fast(buf, buf_end, ranges1, sizeof(ranges1) - 1, &found);
       if (! found) {

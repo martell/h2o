@@ -18,7 +18,8 @@ $ctx->{directive}->(
 )->(sub {
 ?>
 <p>
-If the argument is a mapping, following properties are recognized.
+If the argument is a scalar, the value is considered as the path to a unix socket.
+Following properties are recognized if the argument is a mapping.
 <dl>
 <dt><code>host</code>
 <dd>name (or IP address) of the server running the FastCGI daemon (ignored if <code>type</code> is <code>unix</code>)
@@ -27,9 +28,6 @@ If the argument is a mapping, following properties are recognized.
 <dt><code>type</code>
 <dd>either <code>tcp</code> (default) or <code>unix</code>
 </dl>
-</p>
-<p>
-If the argument is a scalar, the value is considered as a TCP port number and the host is assumed to be <code>127.0.0.1</code>.
 </p>
 <?= $ctx->{example}->('Map <code>/app</code> to FastCGI daemon listening to <code>/tmp/fcgi.sock</code>', <<'EOT');
 hosts:
@@ -59,18 +57,6 @@ The HTTP server records the process id of the expression, and sends <code>SIGTER
 file.custom-handler:
     extension:     .php
     fastcgi.spawn: "PHP_FCGI_CHILDREN=10 exec /usr/local/bin/php-cgi"
-EOT
-?>
-<p>
-As of version 1.4.0, the spawned process is run under the privileges of user specified by the <a href="configure/base_directives.html#user"><code>user</code></a> directive (in version 1.3.x, the FastCGI process was spawned under the privileges that spawned the H2O standalone server).
-It is possible to specify a different user for running the FastCGI process, by providing a mapping that contains an attribute named <code>user</code> together with an attribute named <code>command</code>.
-</p>
-<?= $ctx->{example}->('Running FastCGI processes under user <code>fastcgi</code>', <<'EOT');
-file.custom-handler:
-    extension:     .php
-    fastcgi.spawn:
-        command: "PHP_FCGI_CHILDREN=10 exec /usr/local/bin/php-cgi"
-        user:    fastcgi
 EOT
 ?>
 ? })

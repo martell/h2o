@@ -35,22 +35,24 @@ static int on_config(h2o_configurator_command_t *cmd, h2o_configurator_context_t
         break;
     case YOML_TYPE_MAPPING:
         if ((t = yoml_get(node, "url")) == NULL) {
-            h2o_configurator_errprintf(cmd, node, "mandatory property `url` is missing");
+            //h2o_configurator_errprintf(cmd, node, "mandatory property `url` is missing");
             return -1;
         }
         if (t->type != YOML_TYPE_SCALAR) {
-            h2o_configurator_errprintf(cmd, t, "property `url` must be a string");
+			//h2o_configurator_errprintf(cmd, t, "property `url` must be a string");
             return -1;
         }
         dest = t->data.scalar;
         if ((t = yoml_get(node, "status")) == NULL) {
-            h2o_configurator_errprintf(cmd, node, "mandatory property `status` is missing");
+           //h2o_configurator_errprintf(cmd, node, "mandatory property `status` is missing");
             return -1;
         }
-        if (h2o_configurator_scanf(cmd, t, "%d", &status) != 0)
+        
+		if (h2o_configurator_scanf(cmd, t, "%d", &status) != 0)
             return -1;
+
         if (!(300 <= status && status <= 399)) {
-            h2o_configurator_errprintf(cmd, t, "value of property `status` should be within 300 to 399");
+			//h2o_configurator_errprintf(cmd, t, "value of property `status` should be within 300 to 399");
             return -1;
         }
         if ((t = yoml_get(node, "internal")) != NULL) {
@@ -59,7 +61,7 @@ static int on_config(h2o_configurator_command_t *cmd, h2o_configurator_context_t
         }
         break;
     default:
-        h2o_configurator_errprintf(cmd, node, "value must be a string or a mapping");
+        //h2o_configurator_errprintf(cmd, node, "value must be a string or a mapping");
         return -1;
     }
 

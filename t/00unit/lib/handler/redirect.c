@@ -19,7 +19,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#include <stdlib.h>
+//#include <stdlib.h>
 #include "../../test.h"
 #include "../../../../lib/handler/redirect.c"
 
@@ -41,7 +41,7 @@ void test_lib__handler__redirect_c()
 
     h2o_config_init(&globalconf);
     hostconf = h2o_config_register_host(&globalconf, h2o_iovec_init(H2O_STRLIT("default")), 65535);
-    pathconf = h2o_config_register_path(hostconf, "/", 0);
+    pathconf = h2o_config_register_path(hostconf, "/");
     h2o_redirect_register(pathconf, 0, 301, "https://example.com/bar/");
 
     h2o_context_init(&ctx, test_loop, &globalconf);

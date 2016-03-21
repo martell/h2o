@@ -20,6 +20,8 @@
  * IN THE SOFTWARE.
  */
 
+#include<io.h>
+
 struct st_h2o_uv_socket_t {
     h2o_socket_t super;
     struct {
@@ -85,8 +87,9 @@ static void on_read_ssl(uv_stream_t *stream, ssize_t nread, const uv_buf_t *_unu
 static void on_do_write_complete(uv_write_t *wreq, int status)
 {
     struct st_h2o_uv_socket_t *sock = H2O_STRUCT_FROM_MEMBER(struct st_h2o_uv_socket_t, _wreq, wreq);
-    if (sock->super._cb.write != NULL)
-        on_write_complete(&sock->super, status);
+	if (sock->super._cb.write != NULL)
+	// : Debug
+	on_write_complete(&sock->super, status);
 }
 
 static void free_sock(uv_handle_t *handle)
@@ -111,6 +114,9 @@ void do_read_start(h2o_socket_t *_sock)
         uv_read_start(sock->uv.stream, alloc_inbuf_tcp, on_read_tcp);
     else
         uv_read_start(sock->uv.stream, alloc_inbuf_ssl, on_read_ssl);
+
+	//: Debug
+	printf("In do_read_start \n");
 }
 
 void do_read_stop(h2o_socket_t *_sock)
@@ -124,8 +130,6 @@ void do_write(h2o_socket_t *_sock, h2o_iovec_t *bufs, size_t bufcnt, h2o_socket_
     struct st_h2o_uv_socket_t *sock = (struct st_h2o_uv_socket_t *)_sock;
 
     assert(sock->super._cb.write == NULL);
-    sock->super._cb.write = cb;
-
     uv_write(&sock->_wreq, sock->uv.stream, (uv_buf_t *)bufs, (int)bufcnt, on_do_write_complete);
 }
 
@@ -152,7 +156,7 @@ int do_export(h2o_socket_t *_sock, h2o_socket_export_t *info)
      * events may be reported for that file descriptor if other file descriptors
      * referring to the same underlying file description remain open"
      */
-    if ((info->fd = dup(fd)) == -1)
+    if ((info->fd = _dup(fd)) == -1)
         return -1;
     return 0;
 }
@@ -203,7 +207,7 @@ h2o_socket_t *h2o_socket_connect(h2o_loop_t *loop, struct sockaddr *addr, sockle
 
     if (sock == NULL)
         return NULL;
-    if (uv_tcp_connect(&sock->_creq, (void *)sock->uv.stream, addr, on_connect) != 0) {
+    if (uv_tcp_connect(&sock->_creq, (void *)sock->uv.stream, addr, on_connect) != 0) { // : Debug (error from LibUV)
         h2o_socket_close(&sock->super);
         return NULL;
     }

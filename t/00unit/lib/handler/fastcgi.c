@@ -19,13 +19,13 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#include <stdlib.h>
+//#include <stdlib.h>
 #include "../../test.h"
 #include "../../../../lib/handler/fastcgi.c"
 
 static h2o_context_t ctx;
 
-static int check_params(h2o_iovec_t *vecs, size_t *index, uint16_t request_id, const char *expected, size_t expected_len)
+static int check_params(h2o_iovec_t  *vecs, size_t *index, uint16_t request_id, const char *expected, size_t expected_len)
 {
 #define DECODE_UINT16(p) (((unsigned char *)&p)[0] << 8 | ((unsigned char *)&p)[1])
 
@@ -172,7 +172,7 @@ void test_lib__handler__fastcgi_c()
     h2o_config_init(&globalconf);
     globalconf.server_name = h2o_iovec_init(H2O_STRLIT("h2o/1.2.1-alpha1"));
     hostconf = h2o_config_register_host(&globalconf, h2o_iovec_init(H2O_STRLIT("default")), 65535);
-    pathconf = h2o_config_register_path(hostconf, "/", 0);
+    pathconf = h2o_config_register_path(hostconf, "/");
 
     h2o_context_init(&ctx, test_loop, &globalconf);
 

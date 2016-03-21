@@ -19,7 +19,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#include <arpa/inet.h>
+//#include <arpa/inet.h>
 #include "../../test.h"
 #include "../../../../lib/common/hostinfo.c"
 
@@ -28,22 +28,22 @@ static void test_aton(void)
     struct in_addr addr;
 
     memset(&addr, 0x55, sizeof(addr));
-    ok(h2o_hostinfo_aton((h2o_iovec_t){H2O_STRLIT("127.0.0.1")}, &addr) == 0);
+    ok(h2o_hostinfo_aton((h2o_iovec_t ){H2O_STRLIT("127.0.0.1")}, &addr) == 0);
     ok(ntohl(addr.s_addr) == 0x7f000001);
 
     memset(&addr, 0x55, sizeof(addr));
-    ok(h2o_hostinfo_aton((h2o_iovec_t){"127.0.0.12", sizeof("127.0.0.1") - 1}, &addr) == 0);
+    ok(h2o_hostinfo_aton((h2o_iovec_t ){"127.0.0.12", sizeof("127.0.0.1") - 1}, &addr) == 0);
     ok(ntohl(addr.s_addr) == 0x7f000001);
 
     memset(&addr, 0x55, sizeof(addr));
-    ok(h2o_hostinfo_aton((h2o_iovec_t){H2O_STRLIT("255.001.002.128")}, &addr) == 0);
+    ok(h2o_hostinfo_aton((h2o_iovec_t ){H2O_STRLIT("255.001.002.128")}, &addr) == 0);
     ok(ntohl(addr.s_addr) == 0xff010280);
 
-    ok(h2o_hostinfo_aton((h2o_iovec_t){H2O_STRLIT("127.0.0.z")}, &addr) != 0);
-    ok(h2o_hostinfo_aton((h2o_iovec_t){H2O_STRLIT("256.0.0.0")}, &addr) != 0);
-    ok(h2o_hostinfo_aton((h2o_iovec_t){H2O_STRLIT("0001.0.0.0")}, &addr) != 0);
-    ok(h2o_hostinfo_aton((h2o_iovec_t){H2O_STRLIT("0.0..1")}, &addr) != 0);
-    ok(h2o_hostinfo_aton((h2o_iovec_t){H2O_STRLIT("1.0.0.0.")}, &addr) != 0);
+    ok(h2o_hostinfo_aton((h2o_iovec_t ){H2O_STRLIT("127.0.0.z")}, &addr) != 0);
+    ok(h2o_hostinfo_aton((h2o_iovec_t ){H2O_STRLIT("256.0.0.0")}, &addr) != 0);
+    ok(h2o_hostinfo_aton((h2o_iovec_t ){H2O_STRLIT("0001.0.0.0")}, &addr) != 0);
+    ok(h2o_hostinfo_aton((h2o_iovec_t ){H2O_STRLIT("0.0..1")}, &addr) != 0);
+    ok(h2o_hostinfo_aton((h2o_iovec_t ){H2O_STRLIT("1.0.0.0.")}, &addr) != 0);
 }
 
 void test_lib__common__hostinfo_c(void)

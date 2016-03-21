@@ -44,34 +44,33 @@ static int on_config(h2o_configurator_command_t *cmd, h2o_configurator_context_t
         yoml_t *t;
         /* get path */
         if ((t = yoml_get(node, "path")) == NULL) {
-            h2o_configurator_errprintf(cmd, node, "could not find mandatory key `path`");
+            //h2o_configurator_errprintf(cmd, node, "could not find mandatory key `path`");
             return -1;
         }
         if (t->type != YOML_TYPE_SCALAR) {
-            h2o_configurator_errprintf(cmd, t, "`path` must be scalar");
+            //h2o_configurator_errprintf(cmd, t, "`path` must be scalar");
             return -1;
         }
         path = t->data.scalar;
         /* get format */
         if ((t = yoml_get(node, "format")) != NULL) {
             if (t->type != YOML_TYPE_SCALAR) {
-                h2o_configurator_errprintf(cmd, t, "`format` must be a scalar");
+				//h2o_configurator_errprintf(cmd, t, "`format` must be a scalar");
                 return -1;
             }
             fmt = t->data.scalar;
         }
     } break;
     default:
-        h2o_configurator_errprintf(cmd, node, "node must be a scalar or a mapping");
+       // h2o_configurator_errprintf(cmd, node, "node must be a scalar or a mapping");
         return -1;
     }
 
-    if (!ctx->dry_run) {
-        if ((fh = h2o_access_log_open_handle(path, fmt)) == NULL)
-            return -1;
-        h2o_vector_reserve(NULL, self->handles, self->handles->size + 1);
-        self->handles->entries[self->handles->size++] = fh;
-    }
+    if ((fh = h2o_access_log_open_handle(path, fmt)) == NULL)
+        return -1;
+
+    h2o_vector_reserve(NULL, (h2o_vector_t *)self->handles, sizeof(self->handles->entries[0]), self->handles->size + 1);
+    self->handles->entries[self->handles->size++] = fh;
 
     return 0;
 }
@@ -86,13 +85,12 @@ static int on_config_enter(h2o_configurator_t *_self, h2o_configurator_context_t
 
     /* link the handles */
     memset(self->handles, 0, sizeof(*self->handles));
-    h2o_vector_reserve(NULL, self->handles, self->handles[-1].size + 1);
+    h2o_vector_reserve(NULL, (void *)self->handles, sizeof(self->handles->entries[0]), self->handles[-1].size + 1);
     for (i = 0; i != self->handles[-1].size; ++i) {
         h2o_access_log_filehandle_t *fh = self->handles[-1].entries[i];
         self->handles[0].entries[self->handles[0].size++] = fh;
         h2o_mem_addref_shared(fh);
     }
-
     return 0;
 }
 

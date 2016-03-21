@@ -19,17 +19,66 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <stddef.h>
+#include <stddef.h> 
 #include <stdio.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
+
+//winbase.h creates of issues if windows.h is not included before it.
+#ifdef  _WIN32
+#include <WinSock2.h>
+#include <WS2tcpip.h>
+#pragma comment(lib, "Ws2_32.lib")
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <Winbase.h> 
+#else
+#include <stdlib.h>
 #include <unistd.h>
+#endif
+
+#include "C:\Users\Rathi\Desktop\Repository\one-four-2016\http2-repo1\mmanlibrary_ExternalPosixReplacements\mman.h"  : memory.c
 #include "h2o/memory.h"
+#include "io.h"
+
+
+#ifdef _WIN32
+//Open file with random name generated using temp, with read and write permission, and O_CLOEXEC FLAG. 
+int mkstemp(char* temp) {
+	char *fnTemplate = "fnXXXXXX"; //Last six characters should be like this
+	int sizeInChars;
+	sizeInChars = strnlen(temp, 9) + 1;
+	FILE *fp;
+	errno_t err = _mktemp_s(temp, sizeInChars); //creates a file name...
+	if (err != 0)
+		return -1;
+	else //File name successfully created
+	{
+		if (fp = fopen(temp, "ab+")) // create the file with read/write permission.
+			return _fileno(fp);	//Successful return file descriptor.					 
+		else
+			return -1;
+		fclose(fp);
+	}
+}
+
+//getpagesize for windows
+long getpagesize(void) {
+	static long g_pagesize = 0;
+	if (!g_pagesize) {
+		SYSTEM_INFO system_info;
+		GetSystemInfo(&system_info);
+		g_pagesize = system_info.dwPageSize;
+	}
+	return g_pagesize;
+}
+#endif //Win32
 
 struct st_h2o_mem_recycle_chunk_t {
     struct st_h2o_mem_recycle_chunk_t *next;
@@ -52,9 +101,11 @@ struct st_h2o_mem_pool_shared_ref_t {
     struct st_h2o_mem_pool_shared_entry_t *entry;
 };
 
-void *(*h2o_mem__set_secure)(void *, int, size_t) = memset;
-
-static __thread h2o_mem_recycle_t mempool_allocator = {16};
+#ifdef _WIN32
+static h2o_mem_recycle_t mempool_allocator = { 16 };
+#else
+static __thread h2o_mem_recycle_t mempool_allocator = { 16 };
+#endif
 
 void h2o_fatal(const char *msg)
 {
@@ -178,7 +229,7 @@ void h2o_mem_link_shared(h2o_mem_pool_t *pool, void *p)
 
 static size_t topagesize(size_t capacity)
 {
-    size_t pagesize = getpagesize();
+    size_t pagesize = getpagesize(); 
     return (offsetof(h2o_buffer_t, _buf) + capacity + pagesize - 1) / pagesize * pagesize;
 }
 
@@ -188,17 +239,21 @@ void h2o_buffer__do_free(h2o_buffer_t *buffer)
     if (buffer->capacity == buffer->_prototype->_initial_buf.capacity) {
         h2o_mem_free_recycle(&buffer->_prototype->allocator, buffer);
     } else if (buffer->_fd != -1) {
-        close(buffer->_fd);
-        munmap((void *)buffer, topagesize(buffer->capacity));
+#ifdef _WIN32
+		_close(buffer->_fd);
+#else
+		close(buffer->_fd);
+#endif
+		munmap(buffer, topagesize(buffer->capacity)); 
     } else {
         free(buffer);
     }
 }
 
-h2o_iovec_t h2o_buffer_reserve(h2o_buffer_t **_inbuf, size_t min_guarantee)
+h2o_iovec_t  h2o_buffer_reserve(h2o_buffer_t **_inbuf, size_t min_guarantee)
 {
     h2o_buffer_t *inbuf = *_inbuf;
-    h2o_iovec_t ret;
+    h2o_iovec_t  ret;
 
     if (inbuf->bytes == NULL) {
         h2o_buffer_prototype_t *prototype = H2O_STRUCT_FROM_MEMBER(h2o_buffer_prototype_t, _initial_buf, inbuf);
@@ -231,21 +286,51 @@ h2o_iovec_t h2o_buffer_reserve(h2o_buffer_t **_inbuf, size_t min_guarantee)
                 int fd;
                 h2o_buffer_t *newp;
                 if (inbuf->_fd == -1) {
-                    char *tmpfn = alloca(strlen(inbuf->_prototype->mmap_settings->fn_template) + 1);
-                    strcpy(tmpfn, inbuf->_prototype->mmap_settings->fn_template);
-                    if ((fd = mkstemp(tmpfn)) == -1) {
+                    char *tmpfn = _alloca(strlen(inbuf->_prototype->mmap_settings->fn_template) + 1);
+                    strcpy_s(tmpfn,sizeof(inbuf->_prototype->mmap_settings->fn_template) ,inbuf->_prototype->mmap_settings->fn_template);
+                    //defined in #include <stdlib.h> : mkstemp()
+					
+					/*
+					More about: mkstemp() 
+					The mkstemp() function generates a unique temporary filename from
+					template, creates and opens the file, and returns an open file
+					descriptor for the file.
+
+					The last six characters of template must be "XXXXXX" and these are
+					replaced with a string that makes the filename unique.  Since it will
+					be modified, template must not be a string constant, but should be
+					declared as a character array.
+
+					The file is created with permissions 0600, that is, read plus write
+					for owner only.  The returned file descriptor provides both read and
+					write access to the file.  The file is opened with the open(2) O_EXCL
+					flag, guaranteeing that the caller is the process that creates the
+					file.
+					*/
+
+					//_mktemp_s of windows returns a file name only doesn't opens it. So if I am to use that function I have to take 
+					//care of opening it with above permissions.
+					//A detailed example of doing this : https://msdn.microsoft.com/en-us/library/t8ex5e91.aspx
+
+					if ((fd = mkstemp(tmpfn)) == -1) {
                         fprintf(stderr, "failed to create temporary file:%s:%s\n", tmpfn, strerror(errno));
                         goto MapError;
                     }
-                    unlink(tmpfn);
+                    _unlink(tmpfn);
                 } else {
                     fd = inbuf->_fd;
                 }
-                if (ftruncate(fd, new_allocsize) != 0) {
-                    perror("failed to resize temporary file");
+                //we don't have ftruncate in windows, but _chsize, the difference revolves around the size (2nd) argument only. Both
+				//Return 0 on successful return.
+#ifdef _WIN32
+				if (_chsize(fd, new_allocsize) != 0) {
+#else
+				if (ftruncate(fd, new_allocsize) != 0) {
+#endif //WIN32
+					perror("failed to resize temporary file");
                     goto MapError;
                 }
-                if ((newp = (void *)mmap(NULL, new_allocsize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED) {
+                if ((newp = mmap(NULL, new_allocsize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED) {
                     perror("mmap failed");
                     goto MapError;
                 }
@@ -262,7 +347,7 @@ h2o_iovec_t h2o_buffer_reserve(h2o_buffer_t **_inbuf, size_t min_guarantee)
                 } else {
                     /* munmap */
                     size_t offset = inbuf->bytes - inbuf->_buf;
-                    munmap((void *)inbuf, topagesize(inbuf->capacity));
+                    munmap(inbuf, topagesize(inbuf->capacity));
                     *_inbuf = inbuf = newp;
                     inbuf->capacity = new_capacity;
                     inbuf->bytes = newp->_buf + offset;
@@ -308,11 +393,13 @@ void h2o_buffer_consume(h2o_buffer_t **_inbuf, size_t delta)
     }
 }
 
-void h2o_buffer__dispose_linked(void *p)
-{
-    h2o_buffer_t **buf = p;
-    h2o_buffer_dispose(buf);
+//This function was missing, copied it from current repo.
+void h2o_buffer__dispose_linked(void *p) 
+{ 
+	h2o_buffer_t **buf = p; 
+	h2o_buffer_dispose(buf); 
 }
+
 
 void h2o_vector__expand(h2o_mem_pool_t *pool, h2o_vector_t *vector, size_t element_size, size_t new_capacity)
 {
@@ -329,20 +416,6 @@ void h2o_vector__expand(h2o_mem_pool_t *pool, h2o_vector_t *vector, size_t eleme
         new_entries = h2o_mem_realloc(vector->entries, element_size * vector->capacity);
     }
     vector->entries = new_entries;
-}
-
-void h2o_mem_swap(void *_x, void *_y, size_t len)
-{
-    char *x = _x, *y = _y;
-    char buf[256];
-
-    while (len != 0) {
-        size_t blocksz = len < sizeof(buf) ? len : sizeof(buf);
-        memcpy(buf, x, blocksz);
-        memcpy(x, y, blocksz);
-        memcpy(y, buf, blocksz);
-        len -= blocksz;
-    }
 }
 
 void h2o_dump_memory(FILE *fp, const char *buf, size_t len)

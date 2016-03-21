@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2015-2016 DeNA Co., Ltd., Kazuho Oku, Tatsuhiko Kubo,
- *                         Chul-Woong Yang
+ * Copyright (c) 2015 DeNA Co., Ltd., Kazuho Oku
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -21,7 +20,6 @@
  * IN THE SOFTWARE.
  */
 #include <assert.h>
-#include <pthread.h>
 #include "cloexec.h"
 #include "h2o/multithread.h"
 
@@ -34,7 +32,7 @@ struct st_h2o_multithread_queue_t {
         h2o_socket_t *read;
     } async;
 #endif
-    pthread_mutex_t mutex;
+    uv_mutex_t mutex;
     struct {
         h2o_linklist_t active;
         h2o_linklist_t inactive;
@@ -43,7 +41,7 @@ struct st_h2o_multithread_queue_t {
 
 static void queue_cb(h2o_multithread_queue_t *queue)
 {
-    pthread_mutex_lock(&queue->mutex);
+    uv_mutex_lock(&queue->mutex);
 
     while (!h2o_linklist_is_empty(&queue->receivers.active)) {
         h2o_multithread_receiver_t *receiver =
@@ -57,18 +55,29 @@ static void queue_cb(h2o_multithread_queue_t *queue)
         h2o_linklist_insert(&queue->receivers.inactive, &receiver->_link);
 
         /* dispatch the messages */
-        pthread_mutex_unlock(&queue->mutex);
-        receiver->cb(receiver, &messages);
+#ifdef _WIN32
+		uv_mutex_unlock(&queue->mutex);
+#else
+		pthread_mutex_unlock(&queue->mutex);
+#endif
+		receiver->cb(receiver, &messages);
         assert(h2o_linklist_is_empty(&messages));
-        pthread_mutex_lock(&queue->mutex);
+#ifdef _WIN32
+        uv_mutex_lock(&queue->mutex);
+#else
+		pthread_mutex_lock(&queue->mutex);
+#endif
     }
-
-    pthread_mutex_unlock(&queue->mutex);
+#ifdef _WIN32
+    uv_mutex_unlock(&queue->mutex);
+#else
+	pthread_mutex_unlock(&queue->mutex)
+#endif
 }
+
 
 #if H2O_USE_LIBUV
 #else
-
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -88,13 +97,18 @@ static void init_async(h2o_multithread_queue_t *queue, h2o_loop_t *loop)
 {
     int fds[2];
 
+#ifndef _WIN32
     if (cloexec_pipe(fds) != 0) {
         perror("pipe");
         abort();
     }
     fcntl(fds[1], F_SETFL, O_NONBLOCK);
+#else
+    u_long nonblock = 1;
+    ioctlsocket(fds[1], FIONBIO, &nonblock);
+#endif
     queue->async.write = fds[1];
-    queue->async.read = h2o_evloop_socket_create(loop, fds[0], 0);
+    queue->async.read = h2o_evloop_socket_create(loop, fds[0], NULL, 0, 0);
     queue->async.read->data = queue;
     h2o_socket_read_start(queue->async.read, on_read);
 }
@@ -104,17 +118,23 @@ static void init_async(h2o_multithread_queue_t *queue, h2o_loop_t *loop)
 h2o_multithread_queue_t *h2o_multithread_create_queue(h2o_loop_t *loop)
 {
     h2o_multithread_queue_t *queue = h2o_mem_alloc(sizeof(*queue));
-    *queue = (h2o_multithread_queue_t){};
+    //Empty declaration, below one creates issues in visual studio...
+	h2o_multithread_queue_t temp = {0};
+	*queue = temp;
 
 #if H2O_USE_LIBUV
     uv_async_init(loop, &queue->async, (void *)queue_cb);
 #else
     init_async(queue, loop);
 #endif
-    pthread_mutex_init(&queue->mutex, NULL);
+
+#ifdef _WIN32
+	uv_mutex_init(&queue->mutex);
+#else
+	pthread_mutex_init(&queue->mutex, NULL);
+#endif
     h2o_linklist_init_anchor(&queue->receivers.active);
     h2o_linklist_init_anchor(&queue->receivers.inactive);
-
     return queue;
 }
 
@@ -129,64 +149,74 @@ void h2o_multithread_destroy_queue(h2o_multithread_queue_t *queue)
     h2o_socket_close(queue->async.read);
     close(queue->async.write);
 #endif
-    pthread_mutex_destroy(&queue->mutex);
+#ifdef _WIN32
+	uv_mutex_destroy(&queue->mutex);
+#else
+	pthread_mutex_destroy(&queue->mutex);
+#endif
 }
 
 void h2o_multithread_register_receiver(h2o_multithread_queue_t *queue, h2o_multithread_receiver_t *receiver,
                                        h2o_multithread_receiver_cb cb)
 {
     receiver->queue = queue;
-    receiver->_link = (h2o_linklist_t){};
-    h2o_linklist_init_anchor(&receiver->_messages);
+    //receiver->_link = (h2o_linklist_t){};
+	h2o_linklist_t tmp = {0};
+	receiver->_link = tmp;
+	h2o_linklist_init_anchor(&receiver->_messages);
     receiver->cb = cb;
 
-    pthread_mutex_lock(&queue->mutex);
     h2o_linklist_insert(&queue->receivers.inactive, &receiver->_link);
-    pthread_mutex_unlock(&queue->mutex);
 }
 
 void h2o_multithread_unregister_receiver(h2o_multithread_queue_t *queue, h2o_multithread_receiver_t *receiver)
 {
     assert(queue == receiver->queue);
     assert(h2o_linklist_is_empty(&receiver->_messages));
-    pthread_mutex_lock(&queue->mutex);
     h2o_linklist_unlink(&receiver->_link);
-    pthread_mutex_unlock(&queue->mutex);
 }
 
 void h2o_multithread_send_message(h2o_multithread_receiver_t *receiver, h2o_multithread_message_t *message)
 {
     int do_send = 0;
 
-    pthread_mutex_lock(&receiver->queue->mutex);
-    if (message != NULL) {
-        assert(!h2o_linklist_is_linked(&message->link));
-        if (h2o_linklist_is_empty(&receiver->_messages)) {
-            h2o_linklist_unlink(&receiver->_link);
-            h2o_linklist_insert(&receiver->queue->receivers.active, &receiver->_link);
-            do_send = 1;
-        }
-        h2o_linklist_insert(&receiver->_messages, &message->link);
-    } else {
-        if (h2o_linklist_is_empty(&receiver->_messages))
-            do_send = 1;
+    assert(!h2o_linklist_is_linked(&message->link));
+#ifdef _WIN32
+	uv_mutex_lock(&receiver->queue->mutex);
+#else
+	pthread_mutex_lock(&receiver->queue->mutex);
+#endif
+   
+	if (h2o_linklist_is_empty(&receiver->_messages)) {
+        h2o_linklist_unlink(&receiver->_link);
+        h2o_linklist_insert(&receiver->queue->receivers.active, &receiver->_link);
+        do_send = 1;
     }
-    pthread_mutex_unlock(&receiver->queue->mutex);
-
+    h2o_linklist_insert(&receiver->_messages, &message->link);
+#ifdef _WIN32
+	uv_mutex_unlock(&receiver->queue->mutex);
+#else
+	pthread_mutex_unlock(&receiver->queue->mutex);
+#endif
+    
     if (do_send) {
 #if H2O_USE_LIBUV
         uv_async_send(&receiver->queue->async);
 #else
-        while (write(receiver->queue->async.write, "", 1) == -1 && errno == EINTR)
-            ;
+        while (write(receiver->queue->async.write, "", 1) == -1 && errno == EINTR);
 #endif
     }
 }
 
-void h2o_multithread_create_thread(pthread_t *tid, const pthread_attr_t *attr, void *(*func)(void *), void *arg)
+//return type is like void * here, but libUV asks for void only. Sort it out
+void h2o_multithread_create_thread(uv_thread_t *tid, void *(*func)(void *), void *arg)
 {
-    if (pthread_create(tid, attr, func, arg) != 0) {
-        perror("pthread_create");
+#ifdef _WIN32
+	if (uv_thread_create(tid, func, arg) != 0) {
+#else
+	if (pthread_create(tid, func, arg) != 0) {
+#endif
+	    perror("pthread_create");
         abort();
     }
 }

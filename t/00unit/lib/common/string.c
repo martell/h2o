@@ -22,16 +22,9 @@
 #include "../../test.h"
 #include "../../../../lib/common/string.c"
 
-static void test_strstr(void)
-{
-    ok(h2o_strstr("abcd", 4, "bc", 2) == 1);
-    ok(h2o_strstr("abcd", 3, "bc", 2) == 1);
-    ok(h2o_strstr("abcd", 2, "bc", 2) == -1);
-}
-
 static void test_stripws(void)
 {
-    h2o_iovec_t t;
+    h2o_iovec_t  t;
 
     t = h2o_str_stripws(H2O_STRLIT(""));
     ok(h2o_memis(t.base, t.len, H2O_STRLIT("")));
@@ -47,27 +40,9 @@ static void test_stripws(void)
     ok(h2o_memis(t.base, t.len, H2O_STRLIT("")));
 }
 
-static void test_get_filext(void)
-{
-    h2o_iovec_t ext;
-
-    ext = h2o_get_filext(H2O_STRLIT("/abc.txt"));
-    ok(h2o_memis(ext.base, ext.len, H2O_STRLIT("txt")));
-    ext = h2o_get_filext(H2O_STRLIT("/abc.txt.gz"));
-    ok(h2o_memis(ext.base, ext.len, H2O_STRLIT("gz")));
-    ext = h2o_get_filext(H2O_STRLIT("/abc."));
-    ok(h2o_memis(ext.base, ext.len, H2O_STRLIT("")));
-    ext = h2o_get_filext(H2O_STRLIT("/abc"));
-    ok(ext.base == NULL);
-    ext = h2o_get_filext(H2O_STRLIT("/abc.def/abc"));
-    ok(ext.base == NULL);
-    ext = h2o_get_filext(H2O_STRLIT("/abc.def/"));
-    ok(ext.base == NULL);
-}
-
 static void test_next_token(void)
 {
-    h2o_iovec_t iter;
+    h2o_iovec_t  iter;
     const char *token;
     size_t token_len;
 
@@ -114,7 +89,7 @@ static void test_next_token(void)
 
 static void test_next_token2(void)
 {
-    h2o_iovec_t iter, value;
+    h2o_iovec_t  iter, value;
     const char *name;
     size_t name_len;
 
@@ -162,7 +137,7 @@ static void test_decode_base64(void)
 
     h2o_mem_init_pool(&pool);
 
-    h2o_iovec_t src = {H2O_STRLIT("The quick brown fox jumps over the lazy dog.")}, decoded;
+    h2o_iovec_t  src = {H2O_STRLIT("The quick brown fox jumps over the lazy dog.")}, decoded;
     h2o_base64_encode(buf, (const uint8_t *)src.base, src.len, 1);
     ok(strcmp(buf, "VGhlIHF1aWNrIGJyb3duIGZveCBqdW1wcyBvdmVyIHRoZSBsYXp5IGRvZy4") == 0);
     decoded = h2o_decode_base64url(&pool, buf, strlen(buf));
@@ -179,7 +154,7 @@ static void test_htmlescape(void)
 
 #define TEST(src, expected)                                                                                                        \
     do {                                                                                                                           \
-        h2o_iovec_t escaped = h2o_htmlescape(&pool, H2O_STRLIT(src));                                                              \
+        h2o_iovec_t  escaped = h2o_htmlescape(&pool, H2O_STRLIT(src));                                                              \
         ok(h2o_memis(escaped.base, escaped.len, H2O_STRLIT(expected)));                                                            \
     } while (0)
 
@@ -192,73 +167,11 @@ static void test_htmlescape(void)
     h2o_mem_clear_pool(&pool);
 }
 
-static void test_at_position(void)
-{
-    char buf[160];
-    int ret;
-
-    /* normal cases */
-    ret = h2o_str_at_position(buf, H2O_STRLIT("hello\nworld\n"), 1, 1);
-    ok(ret == 0);
-    ok(strcmp(buf, "hello\n^\n") == 0);
-
-    ret = h2o_str_at_position(buf, H2O_STRLIT("hello\nworld\n"), 1, 5);
-    ok(ret == 0);
-    ok(strcmp(buf, "hello\n    ^\n") == 0);
-
-    ret = h2o_str_at_position(buf, H2O_STRLIT("hello\nworld\n"), 1, 6);
-    ok(ret == 0);
-    ok(strcmp(buf, "hello\n     ^\n") == 0);
-
-    ret = h2o_str_at_position(buf, H2O_STRLIT("hello\nworld\n"), 1, 7);
-    ok(ret == 0);
-    ok(strcmp(buf, "hello\n     ^\n") == 0);
-
-    ret = h2o_str_at_position(buf, H2O_STRLIT("hello\nworld\n"), 2, 1);
-    ok(ret == 0);
-    ok(strcmp(buf, "world\n^\n") == 0);
-
-    ret = h2o_str_at_position(buf, H2O_STRLIT("hello\nworld\n"), 2, 5);
-    ok(ret == 0);
-    ok(strcmp(buf, "world\n    ^\n") == 0);
-
-    ret = h2o_str_at_position(buf, H2O_STRLIT("hello\nworld\n"), 1, 7);
-    ok(ret == 0);
-    ok(strcmp(buf, "hello\n     ^\n") == 0);
-
-    ret = h2o_str_at_position(
-        buf, H2O_STRLIT("_________1_________2_________3_________4_________5_________6_________7_________\nworld\n"), 1, 5);
-    ok(ret == 0);
-    ok(strcmp(buf, "_________1_________2_________3_________4_________5_________6_________7______\n    ^\n") == 0);
-
-    ret = h2o_str_at_position(
-        buf, H2O_STRLIT("_________1_________2_________3_________4_________5_________6_________7_________\nworld\n"), 1, 60);
-    ok(ret == 0);
-    ok(strcmp(buf, "_________3_________4_________5_________6_________7_________\n                                       ^\n") == 0);
-
-    ret = h2o_str_at_position(buf, H2O_STRLIT("hello"), 1, 20);
-    ok(ret == 0);
-    ok(strcmp(buf, "hello\n     ^\n") == 0);
-
-    /* error cases */
-    ret = h2o_str_at_position(buf, H2O_STRLIT("hello\nworld\n"), 0, 1);
-    ok(ret != 0);
-
-    ret = h2o_str_at_position(buf, H2O_STRLIT("hello\nworld\n"), 1, 0);
-    ok(ret != 0);
-
-    ret = h2o_str_at_position(buf, H2O_STRLIT("hello\nworld\n"), 4, 1);
-    ok(ret != 0);
-}
-
 void test_lib__common__string_c(void)
 {
-    subtest("strstr", test_strstr);
     subtest("stripws", test_stripws);
-    subtest("get_filext", test_get_filext);
     subtest("next_token", test_next_token);
     subtest("next_token2", test_next_token2);
     subtest("decode_base64", test_decode_base64);
     subtest("htmlescape", test_htmlescape);
-    subtest("at_position", test_at_position);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2016 DeNA Co., Ltd., Kazuho Oku
+ * Copyright (c) 2014 DeNA Co., Ltd.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -20,12 +20,21 @@
  * IN THE SOFTWARE.
  */
 #include <assert.h>
-#include <errno.h>
+#ifdef _WIN32
+# include <ws2tcpip.h>
+# ifndef AI_ADDRCONFIG
+#  define AI_ADDRCONFIG 0
+# endif
+# ifndef AI_NUMERICSERV
+#  define AI_NUMERICSERV 8
+# endif
+#else
 #include <netdb.h>
-#include <stdlib.h>
+//#include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+#endif
 #include "h2o/hostinfo.h"
 #include "h2o/linklist.h"
 #include "h2o/socketpool.h"
@@ -47,16 +56,11 @@ struct st_h2o_socketpool_connect_request_t {
     h2o_socket_t *sock;
 };
 
-static void destroy_detached(struct pool_entry_t *entry)
-{
-    h2o_socket_dispose_export(&entry->sockinfo);
-    free(entry);
-}
-
 static void destroy_attached(struct pool_entry_t *entry)
 {
     h2o_linklist_unlink(&entry->link);
-    destroy_detached(entry);
+    h2o_socket_dispose_export(&entry->sockinfo);
+    free(entry);
 }
 
 static void destroy_expired(h2o_socketpool_t *pool)
@@ -68,8 +72,13 @@ static void destroy_expired(h2o_socketpool_t *pool)
         if (entry->added_at > expire_before)
             break;
         destroy_attached(entry);
-        __sync_sub_and_fetch(&pool->_shared.count, 1);
-    }
+
+#ifdef _WIN32
+		InterlockedDecrement(&pool->_shared.count);
+#else
+		__sync_sub_and_fetch(&pool->_shared.count, 1);
+#endif
+	}
 }
 
 static void on_timeout(h2o_timeout_entry_t *timeout_entry)
@@ -79,9 +88,9 @@ static void on_timeout(h2o_timeout_entry_t *timeout_entry)
      */
     h2o_socketpool_t *pool = H2O_STRUCT_FROM_MEMBER(h2o_socketpool_t, _interval_cb.entry, timeout_entry);
 
-    if (pthread_mutex_trylock(&pool->_shared.mutex) == 0) {
+    if (uv_mutex_trylock(&pool->_shared.mutex) == 0) {
         destroy_expired(pool);
-        pthread_mutex_unlock(&pool->_shared.mutex);
+        uv_mutex_unlock(&pool->_shared.mutex);
     }
 
     h2o_timeout_link(pool->_interval_cb.loop, &pool->_interval_cb.timeout, &pool->_interval_cb.entry);
@@ -94,9 +103,12 @@ static void common_init(h2o_socketpool_t *pool, h2o_socketpool_type_t type, size
     pool->type = type;
     pool->capacity = capacity;
     pool->timeout = UINT64_MAX;
-
-    pthread_mutex_init(&pool->_shared.mutex, NULL);
-    h2o_linklist_init_anchor(&pool->_shared.sockets);
+#ifdef _WIN32
+	uv_mutex_init(&pool->_shared.mutex);
+#else
+	pthread_mutex_init(&pool->_shared.mutex, NULL);
+#endif
+	h2o_linklist_init_anchor(&pool->_shared.sockets);
 }
 
 void h2o_socketpool_init_by_address(h2o_socketpool_t *pool, struct sockaddr *sa, socklen_t salen, size_t capacity)
@@ -108,9 +120,9 @@ void h2o_socketpool_init_by_address(h2o_socketpool_t *pool, struct sockaddr *sa,
     pool->peer.sockaddr.len = salen;
 }
 
-void h2o_socketpool_init_by_hostport(h2o_socketpool_t *pool, h2o_iovec_t host, uint16_t port, size_t capacity)
+void h2o_socketpool_init_by_hostport(h2o_socketpool_t *pool, h2o_iovec_t  host, uint16_t port, size_t capacity)
 {
-    struct sockaddr_in sin = {};
+    struct sockaddr_in sin;
 
     if (h2o_hostinfo_aton(host, &sin.sin_addr) == 0) {
         sin.sin_family = AF_INET;
@@ -121,21 +133,35 @@ void h2o_socketpool_init_by_hostport(h2o_socketpool_t *pool, h2o_iovec_t host, u
 
     common_init(pool, H2O_SOCKETPOOL_TYPE_NAMED, capacity);
     pool->peer.named.host = h2o_strdup(NULL, host.base, host.len);
-    pool->peer.named.port.base = h2o_mem_alloc(sizeof(H2O_UINT16_LONGEST_STR));
-    pool->peer.named.port.len = sprintf(pool->peer.named.port.base, "%u", (unsigned)port);
+    pool->peer.named.port.base = h2o_mem_alloc(sizeof("65535"));
+    pool->peer.named.port.len = sprintf(pool->peer.named.port.base,"%u", (unsigned)port);
 }
 
 void h2o_socketpool_dispose(h2o_socketpool_t *pool)
 {
-    pthread_mutex_lock(&pool->_shared.mutex);
+
+#ifdef _WIN32
+    uv_mutex_lock(&pool->_shared.mutex);
+#else
+	pthread_mutex_lock(&pool->_shared.mutex);
+#endif
     while (!h2o_linklist_is_empty(&pool->_shared.sockets)) {
         struct pool_entry_t *entry = H2O_STRUCT_FROM_MEMBER(struct pool_entry_t, link, pool->_shared.sockets.next);
         destroy_attached(entry);
-        __sync_sub_and_fetch(&pool->_shared.count, 1);
-    }
-    pthread_mutex_unlock(&pool->_shared.mutex);
-    pthread_mutex_destroy(&pool->_shared.mutex);
+#ifdef _WIN32
+		InterlockedDecrement(&pool->_shared.count);
+#else
+		__sync_sub_and_fetch(&pool->_shared.count, 1);
+#endif
+	}
 
+#ifdef _WIN32
+    uv_mutex_unlock(&pool->_shared.mutex);
+    uv_mutex_destroy(&pool->_shared.mutex);
+#else
+	pthread_mutex_unlock(&pool->_shared.mutex);
+	pthread_mutex_destroy(&pool->_shared.mutex);
+#endif
     if (pool->_interval_cb.loop != NULL) {
         h2o_timeout_unlink(&pool->_interval_cb.entry);
         h2o_timeout_dispose(pool->_interval_cb.loop, &pool->_interval_cb.timeout);
@@ -189,14 +215,22 @@ static void on_connect(h2o_socket_t *sock, int status)
 static void on_close(void *data)
 {
     h2o_socketpool_t *pool = data;
-    __sync_sub_and_fetch(&pool->_shared.count, 1);
+#ifdef _WIN32
+	InterlockedDecrement(&pool->_shared.count);
+#else
+	__sync_sub_and_fetch(&pool->_shared.count, 1);
+#endif
 }
 
 static void start_connect(h2o_socketpool_connect_request_t *req, struct sockaddr *addr, socklen_t addrlen)
 {
     req->sock = h2o_socket_connect(req->loop, addr, addrlen, on_connect);
     if (req->sock == NULL) {
-        __sync_sub_and_fetch(&req->pool->_shared.count, 1);
+		#ifdef _WIN32
+				InterlockedDecrement(&req->pool->_shared.count);
+		#else
+				__sync_sub_and_fetch(&req->pool->_shared.count, 1);
+		#endif
         call_connect_cb(req, "failed to connect to host");
         return;
     }
@@ -213,8 +247,12 @@ static void on_getaddr(h2o_hostinfo_getaddr_req_t *getaddr_req, const char *errs
     req->getaddr_req = NULL;
 
     if (errstr != NULL) {
-        __sync_sub_and_fetch(&req->pool->_shared.count, 1);
-        call_connect_cb(req, errstr);
+#ifdef _WIN32
+		InterlockedDecrement(&req->pool->_shared.count);
+#else
+		__sync_sub_and_fetch(&req->pool->_shared.count, 1);
+#endif
+		call_connect_cb(req, errstr);
         return;
     }
 
@@ -226,50 +264,43 @@ void h2o_socketpool_connect(h2o_socketpool_connect_request_t **_req, h2o_socketp
                             h2o_multithread_receiver_t *getaddr_receiver, h2o_socketpool_connect_cb cb, void *data)
 {
     struct pool_entry_t *entry = NULL;
+	printf("Reached in socketpool.c \n");
 
     if (_req != NULL)
         *_req = NULL;
 
-    /* fetch an entry and return it */
-    pthread_mutex_lock(&pool->_shared.mutex);
+    /* fetch an entry */
+#ifdef _WIN32
+    uv_mutex_lock(&pool->_shared.mutex);
+#else
+	pthread_mutex_lock(&pool->_shared.mutex);
+#endif
     destroy_expired(pool);
-    while (1) {
-        if (h2o_linklist_is_empty(&pool->_shared.sockets))
-            break;
+    if (!h2o_linklist_is_empty(&pool->_shared.sockets)) {
         entry = H2O_STRUCT_FROM_MEMBER(struct pool_entry_t, link, pool->_shared.sockets.next);
         h2o_linklist_unlink(&entry->link);
-        pthread_mutex_unlock(&pool->_shared.mutex);
-
-        /* test if the connection is still alive */
-        char buf[1];
-        ssize_t rret = recv(entry->sockinfo.fd, buf, 1, MSG_PEEK);
-        if (rret == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            /* yes! return it */
-            h2o_socket_t *sock = h2o_socket_import(loop, &entry->sockinfo);
-            free(entry);
-            sock->on_close.cb = on_close;
-            sock->on_close.data = pool;
-            cb(sock, NULL, data);
-            return;
-        }
-
-        /* connection is dead, report, close, and retry */
-        if (rret <= 0) {
-            static long counter = 0;
-            if (__sync_fetch_and_add(&counter, 1) == 0)
-                fprintf(stderr, "[WARN] detected close by upstream before the expected timeout (see issue #679)\n");
-        } else {
-            static long counter = 0;
-            if (__sync_fetch_and_add(&counter, 1) == 0)
-                fprintf(stderr, "[WARN] unexpectedly received data to a pooled socket (see issue #679)\n");
-        }
-        destroy_detached(entry);
-        pthread_mutex_lock(&pool->_shared.mutex);
     }
-    pthread_mutex_unlock(&pool->_shared.mutex);
+#ifdef _WIN32
+    uv_mutex_unlock(&pool->_shared.mutex);
+#else
+	pthread_mutex_unlock(&pool->_shared.mutex);
+#endif
+    /* return the socket, if any */
+    if (entry != NULL) {
+        h2o_socket_t *sock = h2o_socket_import(loop, &entry->sockinfo);
+        free(entry);
+        sock->on_close.cb = on_close;
+        sock->on_close.data = pool;
+        cb(sock, NULL, data);
+        return;
+    }
 
     /* FIXME repsect `capacity` */
-    __sync_add_and_fetch(&pool->_shared.count, 1);
+#ifdef _WIN32	
+	InterlockedIncrement(&pool->_shared.count);
+#else
+	__sync_add_and_fetch(&pool->_shared.count, 1);
+#endif
 
     /* prepare request object */
     h2o_socketpool_connect_request_t *req = h2o_mem_alloc(sizeof(*req));
@@ -279,14 +310,14 @@ void h2o_socketpool_connect(h2o_socketpool_connect_request_t **_req, h2o_socketp
 
     switch (pool->type) {
     case H2O_SOCKETPOOL_TYPE_NAMED:
-        /* resolve the name, and connect */
+        /* resolve the name, and connect */ 
         req->getaddr_req = h2o_hostinfo_getaddr(getaddr_receiver, pool->peer.named.host, pool->peer.named.port, AF_UNSPEC,
                                                 SOCK_STREAM, IPPROTO_TCP, AI_ADDRCONFIG | AI_NUMERICSERV, on_getaddr, req);
-        break;
+		break;
     case H2O_SOCKETPOOL_TYPE_SOCKADDR:
         /* connect (using sockaddr_in) */
         start_connect(req, (void *)&pool->peer.sockaddr.bytes, pool->peer.sockaddr.len);
-        break;
+		break;
     }
 }
 
@@ -313,16 +344,27 @@ int h2o_socketpool_return(h2o_socketpool_t *pool, h2o_socket_t *sock)
     entry = h2o_mem_alloc(sizeof(*entry));
     if (h2o_socket_export(sock, &entry->sockinfo) != 0) {
         free(entry);
-        __sync_sub_and_fetch(&pool->_shared.count, 1);
-        return -1;
+#ifdef _WIN32
+		InterlockedDecrement(&pool->_shared.count);
+#else
+		__sync_sub_and_fetch(&pool->_shared.count, 1);
+#endif
+		return -1;
     }
     memset(&entry->link, 0, sizeof(entry->link));
     entry->added_at = h2o_now(h2o_socket_get_loop(sock));
 
-    pthread_mutex_lock(&pool->_shared.mutex);
+#ifdef _WIN32
+    uv_mutex_lock(&pool->_shared.mutex);
+#else
+	pthread_mutex_lock((&pool->_shared.mutex));
+#endif
     destroy_expired(pool);
     h2o_linklist_insert(&pool->_shared.sockets, &entry->link);
-    pthread_mutex_unlock(&pool->_shared.mutex);
-
+#ifdef _WIN32
+	uv_mutex_unlock(&pool->_shared.mutex);
+#else
+	pthread_mutex_unlock(&pool->_shared.mutex);
+#endif
     return 0;
 }

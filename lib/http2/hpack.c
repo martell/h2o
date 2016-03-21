@@ -22,7 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
+//#include <stdlib.h>
 #include "h2o.h"
 #include "h2o/http2.h"
 #include "h2o/http2_internal.h"
@@ -30,37 +30,35 @@
 #define HEADER_TABLE_OFFSET 62
 #define HEADER_TABLE_ENTRY_SIZE_OFFSET 32
 #define STATUS_HEADER_MAX_SIZE 5
-#define CONTENT_LENGTH_HEADER_MAX_SIZE                                                                                             \
-    (3 + sizeof(H2O_UINT64_LONGEST_STR) - 1) /* uses Literal Header Field without Indexing (RFC7541 6.2.2) */
 
 struct st_h2o_hpack_static_table_entry_t {
     const h2o_token_t *name;
-    const h2o_iovec_t value;
+    const h2o_iovec_t  value;
 };
 
 struct st_h2o_hpack_header_table_entry_t {
-    h2o_iovec_t *name;
-    h2o_iovec_t *value;
+    h2o_iovec_t  *name;
+    h2o_iovec_t  *value;
 };
 
 struct st_h2o_decode_header_result_t {
-    h2o_iovec_t *name;
-    h2o_iovec_t *value;
+    h2o_iovec_t  *name;
+    h2o_iovec_t  *value;
 };
 
 #include "hpack_huffman_table.h"
 #include "hpack_static_table.h"
 
-static inline int value_is_part_of_static_table(const h2o_iovec_t *value)
+static inline int value_is_part_of_static_table(const h2o_iovec_t  *value)
 {
     return &h2o_hpack_static_table[0].value <= value &&
            value <= &h2o_hpack_static_table[sizeof(h2o_hpack_static_table) / sizeof(h2o_hpack_static_table[0]) - 1].value;
 }
 
-static h2o_iovec_t *alloc_buf(h2o_mem_pool_t *pool, size_t len)
+static h2o_iovec_t  *alloc_buf(h2o_mem_pool_t *pool, size_t len)
 {
-    h2o_iovec_t *buf = h2o_mem_alloc_shared(pool, sizeof(h2o_iovec_t) + len + 1, NULL);
-    buf->base = (char *)buf + sizeof(h2o_iovec_t);
+    h2o_iovec_t  *buf = h2o_mem_alloc_shared(pool, sizeof(h2o_iovec_t ) + len + 1, NULL);
+    buf->base = (char *)buf + sizeof(h2o_iovec_t );
     buf->len = len;
     return buf;
 }
@@ -116,13 +114,13 @@ static char *huffdecode4(char *dst, uint8_t in, uint8_t *state, int *maybe_eos)
     return dst;
 }
 
-static h2o_iovec_t *decode_huffman(h2o_mem_pool_t *pool, const uint8_t *src, size_t len)
+static h2o_iovec_t  *decode_huffman(h2o_mem_pool_t *pool, const uint8_t *src, size_t len)
 {
     const uint8_t *src_end = src + len;
     char *dst;
     uint8_t state = 0;
     int maybe_eos = 1;
-    h2o_iovec_t *dst_buf = alloc_buf(pool, len * 2); /* max compression ratio is >= 0.5 */
+    h2o_iovec_t  *dst_buf = alloc_buf(pool, len * 2); /* max compression ratio is >= 0.5 */
 
     dst = dst_buf->base;
     for (; src != src_end; src++) {
@@ -140,9 +138,9 @@ static h2o_iovec_t *decode_huffman(h2o_mem_pool_t *pool, const uint8_t *src, siz
     return dst_buf;
 }
 
-static h2o_iovec_t *decode_string(h2o_mem_pool_t *pool, const uint8_t **src, const uint8_t *src_end)
+static h2o_iovec_t  *decode_string(h2o_mem_pool_t *pool, const uint8_t **src, const uint8_t *src_end)
 {
-    h2o_iovec_t *ret;
+    h2o_iovec_t  *ret;
     int is_huffman;
     int32_t len;
 
@@ -285,9 +283,9 @@ Redo:
     if (index != 0) {
         /* existing name (and value?) */
         if (index < HEADER_TABLE_OFFSET) {
-            result->name = (h2o_iovec_t *)h2o_hpack_static_table[index - 1].name;
+            result->name = (h2o_iovec_t  *)h2o_hpack_static_table[index - 1].name;
             if (value_is_indexed) {
-                result->value = (h2o_iovec_t *)&h2o_hpack_static_table[index - 1].value;
+                result->value = (h2o_iovec_t  *)&h2o_hpack_static_table[index - 1].value;
             }
         } else if (index - HEADER_TABLE_OFFSET < hpack_header_table->num_entries) {
             struct st_h2o_hpack_header_table_entry_t *entry = header_table_get(hpack_header_table, index - HEADER_TABLE_OFFSET);
@@ -312,7 +310,7 @@ Redo:
         }
         /* predefined header names should be interned */
         if ((name_token = h2o_lookup_token(result->name->base, result->name->len)) != NULL)
-            result->name = (h2o_iovec_t *)&name_token->buf;
+            result->name = (h2o_iovec_t  *)&name_token->buf;
     }
 
     /* determine the value (if necessary) */
@@ -361,28 +359,10 @@ static uint8_t *encode_status(uint8_t *dst, int status)
         /* use literal header field without indexing - indexed name */
         *dst++ = 8;
         *dst++ = 3;
-        sprintf((char *)dst, "%d", status);
+        sprintf((char *)dst,"%d", status);
         dst += 3;
         break;
     }
-
-    return dst;
-}
-
-static uint8_t *encode_content_length(uint8_t *dst, size_t value)
-{
-    char buf[32], *p = buf + sizeof(buf);
-    size_t l;
-
-    do {
-        *--p = '0' + value % 10;
-    } while ((value /= 10) != 0);
-    l = buf + sizeof(buf) - p;
-    *dst++ = 0x0f;
-    *dst++ = 0x0d;
-    *dst++ = (uint8_t)l;
-    memcpy(dst, p, l);
-    dst += l;
 
     return dst;
 }
@@ -407,7 +387,9 @@ int h2o_hpack_parse_headers(h2o_req_t *req, h2o_hpack_header_table_t *header_tab
                             int *pseudo_header_exists_map, size_t *content_length, const char **err_desc)
 {
     const uint8_t *src_end = src + len;
+    int allow_pseudo = 1;
 
+    *pseudo_header_exists_map = 0;
     *content_length = SIZE_MAX;
 
     while (src != src_end) {
@@ -416,7 +398,7 @@ int h2o_hpack_parse_headers(h2o_req_t *req, h2o_hpack_header_table_t *header_tab
         if (ret != 0)
             return ret;
         if (r.name->base[0] == ':') {
-            if (pseudo_header_exists_map != NULL) {
+            if (allow_pseudo) {
                 /* FIXME validate the chars in the value (e.g. reject SP in path) */
                 if (r.name == &H2O_TOKEN_AUTHORITY->buf) {
                     /* FIXME should we perform this check? */
@@ -451,7 +433,7 @@ int h2o_hpack_parse_headers(h2o_req_t *req, h2o_hpack_header_table_t *header_tab
                 return H2O_HTTP2_ERROR_PROTOCOL;
             }
         } else {
-            pseudo_header_exists_map = NULL;
+            allow_pseudo = 0;
             if (h2o_iovec_is_token(r.name)) {
                 h2o_token_t *token = H2O_STRUCT_FROM_MEMBER(h2o_token_t, buf, r.name);
                 if (token == H2O_TOKEN_CONTENT_LENGTH) {
@@ -477,14 +459,9 @@ int h2o_hpack_parse_headers(h2o_req_t *req, h2o_hpack_header_table_t *header_tab
     return 0;
 }
 
-static inline int encode_int_is_onebyte(uint32_t value, size_t prefix_bits)
-{
-    return value < (1 << prefix_bits) - 1;
-}
-
 static uint8_t *encode_int(uint8_t *dst, uint32_t value, size_t prefix_bits)
 {
-    if (encode_int_is_onebyte(value, prefix_bits)) {
+    if (value < (1 << prefix_bits) - 1) {
         *dst++ |= value;
     } else {
         /* see also: MAX_ENCODE_INT_LENGTH */
@@ -532,43 +509,37 @@ static size_t encode_huffman(uint8_t *_dst, const uint8_t *src, size_t len)
     return dst - _dst;
 }
 
-static size_t encode_as_is(uint8_t *dst, const char *s, size_t len)
+size_t h2o_hpack_encode_string(uint8_t *_dst, const char *s, size_t len)
 {
-    uint8_t *start = dst;
+    uint8_t *dst = _dst;
+    uint8_t huffbuf[4096];
+
+    /* try to encode in huffman */
+    if (0 < len && len < sizeof(huffbuf)) {
+        size_t hufflen = encode_huffman(huffbuf, (const uint8_t *)s, len);
+        if (hufflen != 0) {
+            *dst = '\x80';
+            dst = encode_int(dst, (uint32_t)hufflen, 7);
+            memcpy(dst, huffbuf, hufflen);
+            dst += hufflen;
+            goto Exit;
+        }
+    }
+
+    /* encode as-is */
     *dst = '\0';
     dst = encode_int(dst, (uint32_t)len, 7);
     memcpy(dst, s, len);
     dst += len;
-    return dst - start;
+
+Exit:
+    return dst - _dst;
 }
 
-size_t h2o_hpack_encode_string(uint8_t *dst, const char *s, size_t len)
+static uint8_t *encode_header(h2o_hpack_header_table_t *header_table, uint8_t *dst, const h2o_iovec_t  *name,
+                              const h2o_iovec_t  *value)
 {
-    if (H2O_LIKELY(len != 0)) {
-        /* try to encode using huffman */
-        size_t hufflen = encode_huffman(dst + 1, (const uint8_t *)s, len);
-        if (H2O_LIKELY(hufflen != 0)) {
-            size_t head_len;
-            if (H2O_LIKELY(encode_int_is_onebyte((uint32_t)hufflen, 7))) {
-                dst[0] = (uint8_t)(0x80 | hufflen);
-                head_len = 1;
-            } else {
-                uint8_t head[8];
-                head[0] = '\x80';
-                head_len = encode_int(head, (uint32_t)hufflen, 7) - head;
-                memmove(dst + head_len, dst + 1, hufflen);
-                memcpy(dst, head, head_len);
-            }
-            return head_len + hufflen;
-        }
-    }
-    return encode_as_is(dst, s, len);
-}
-
-static uint8_t *encode_header(h2o_hpack_header_table_t *header_table, uint8_t *dst, const h2o_iovec_t *name,
-                              const h2o_iovec_t *value)
-{
-    int name_index = 0, name_is_token = h2o_iovec_is_token(name);
+    int static_table_name_index, name_is_token = h2o_iovec_is_token(name);
 
     /* try to send as indexed */
     {
@@ -581,12 +552,10 @@ static uint8_t *encode_header(h2o_hpack_header_table_t *header_table, uint8_t *d
             } else {
                 if (!h2o_memis(name->base, name->len, entry->name->base, entry->name->len))
                     goto Next;
-                if (name_index == 0)
-                    name_index = (int)(header_table->num_entries - n + HEADER_TABLE_OFFSET);
             }
             /* name matched! */
             if (!h2o_memis(value->base, value->len, entry->value->base, entry->value->len))
-                goto Next;
+                continue;
             /* name and value matched! */
             *dst = 0x80;
             dst = encode_int(dst, (uint32_t)(header_table->num_entries - n + HEADER_TABLE_OFFSET), 7);
@@ -598,15 +567,17 @@ static uint8_t *encode_header(h2o_hpack_header_table_t *header_table, uint8_t *d
         }
     }
 
-    if (name_is_token) {
+    if (h2o_iovec_is_token(name)) {
         const h2o_token_t *name_token = H2O_STRUCT_FROM_MEMBER(h2o_token_t, buf, name);
-        name_index = name_token->http2_static_table_name_index;
+        static_table_name_index = name_token->http2_static_table_name_index;
+    } else {
+        static_table_name_index = 0;
     }
 
-    if (name_index != 0) {
+    if (static_table_name_index != 0) {
         /* literal header field with indexing (indexed name) */
         *dst = 0x40;
-        dst = encode_int(dst, name_index, 6);
+        dst = encode_int(dst, static_table_name_index, 6);
     } else {
         /* literal header field with indexing (new name) */
         *dst++ = 0x40;
@@ -619,12 +590,12 @@ static uint8_t *encode_header(h2o_hpack_header_table_t *header_table, uint8_t *d
         struct st_h2o_hpack_header_table_entry_t *entry =
             header_table_add(header_table, name->len + value->len + HEADER_TABLE_ENTRY_SIZE_OFFSET, 32);
         if (entry != NULL) {
-            if (name_is_token) {
-                entry->name = (h2o_iovec_t *)name;
+            if (static_table_name_index != 0) {
+                entry->name = (h2o_iovec_t  *)h2o_hpack_static_table[static_table_name_index - 1].name;
             } else {
                 entry->name = alloc_buf(NULL, name->len);
                 entry->name->base[name->len] = '\0';
-                memcpy(entry->name->base, name->base, name->len);
+                memcpy(entry->name->base, name, name->len);
             }
             entry->value = alloc_buf(NULL, value->len);
             entry->value->base[value->len] = '\0';
@@ -635,46 +606,7 @@ static uint8_t *encode_header(h2o_hpack_header_table_t *header_table, uint8_t *d
     return dst;
 }
 
-static uint8_t *encode_method(h2o_hpack_header_table_t *header_table, uint8_t *dst, h2o_iovec_t value)
-{
-    if (h2o_memis(value.base, value.len, H2O_STRLIT("GET"))) {
-        *dst++ = 0x82;
-        return dst;
-    }
-    if (h2o_memis(value.base, value.len, H2O_STRLIT("POST"))) {
-        *dst++ = 0x83;
-        return dst;
-    }
-    return encode_header(header_table, dst, &H2O_TOKEN_METHOD->buf, &value);
-}
-
-static uint8_t *encode_scheme(h2o_hpack_header_table_t *header_table, uint8_t *dst, const h2o_url_scheme_t *scheme)
-{
-    if (scheme == &H2O_URL_SCHEME_HTTPS) {
-        *dst++ = 0x87;
-        return dst;
-    }
-    if (scheme == &H2O_URL_SCHEME_HTTP) {
-        *dst++ = 0x86;
-        return dst;
-    }
-    return encode_header(header_table, dst, &H2O_TOKEN_SCHEME->buf, &scheme->name);
-}
-
-static uint8_t *encode_path(h2o_hpack_header_table_t *header_table, uint8_t *dst, h2o_iovec_t value)
-{
-    if (h2o_memis(value.base, value.len, H2O_STRLIT("/"))) {
-        *dst++ = 0x84;
-        return dst;
-    }
-    if (h2o_memis(value.base, value.len, H2O_STRLIT("/index.html"))) {
-        *dst++ = 0x85;
-        return dst;
-    }
-    return encode_header(header_table, dst, &H2O_TOKEN_PATH->buf, &value);
-}
-
-static uint8_t *encode_literal_header_without_indexing(uint8_t *dst, const h2o_iovec_t *name, const h2o_iovec_t *value)
+static uint8_t *encode_literal_header_without_indexing(uint8_t *dst, const h2o_iovec_t  *name, const h2o_iovec_t  *value)
 {
     /* literal header field without indexing / never indexed */
     *dst++ = 0;
@@ -688,13 +620,22 @@ static size_t calc_capacity(size_t name_len, size_t value_len)
     return name_len + value_len + 1 + H2O_HTTP2_ENCODE_INT_MAX_LENGTH * 2;
 }
 
-static size_t calc_headers_capacity(const h2o_header_t *headers, size_t num_headers)
+static size_t flatten_headers_calc_capacity(const h2o_header_t *headers, size_t num_headers)
 {
     const h2o_header_t *header;
     size_t capacity = 0;
     for (header = headers; num_headers != 0; ++header, --num_headers)
         capacity += calc_capacity(header->name->len, header->value.len);
     return capacity;
+}
+
+static uint8_t *flatten_headers(uint8_t *dst, h2o_hpack_header_table_t *header_table, const h2o_header_t *headers,
+                                size_t num_headers)
+{
+    const h2o_header_t *header;
+    for (header = headers; num_headers != 0; ++header, --num_headers)
+        dst = encode_header(header_table, dst, header->name, &header->value);
+    return dst;
 }
 
 static void fixup_frame_headers(h2o_buffer_t **buf, size_t start_at, uint8_t type, uint32_t stream_id, size_t max_frame_size)
@@ -731,7 +672,7 @@ static void fixup_frame_headers(h2o_buffer_t **buf, size_t start_at, uint8_t typ
 void h2o_hpack_flatten_request(h2o_buffer_t **buf, h2o_hpack_header_table_t *header_table, uint32_t stream_id,
                                size_t max_frame_size, h2o_req_t *req, uint32_t parent_stream_id)
 {
-    size_t capacity = calc_headers_capacity(req->headers.entries, req->headers.size);
+    size_t capacity = flatten_headers_calc_capacity(req->headers.entries, req->headers.size);
     capacity += H2O_HTTP2_FRAME_HEADER_SIZE /* first frame header */
                 + 4;                        /* promised stream id */
     capacity += calc_capacity(H2O_TOKEN_METHOD->buf.len, req->input.method.len);
@@ -740,24 +681,19 @@ void h2o_hpack_flatten_request(h2o_buffer_t **buf, h2o_hpack_header_table_t *hea
     capacity += calc_capacity(H2O_TOKEN_PATH->buf.len, req->input.path.len);
 
     size_t start_at = (*buf)->size;
-    uint8_t *dst = (void *)h2o_buffer_reserve(buf, capacity).base + H2O_HTTP2_FRAME_HEADER_SIZE;
+    //uint8_t *dst = (void *)h2o_buffer_reserve(buf, capacity).base + H2O_HTTP2_FRAME_HEADER_SIZE;
+	uint8_t *dst = (uint8_t *)h2o_buffer_reserve(buf, capacity).base + H2O_HTTP2_FRAME_HEADER_SIZE;
 
     /* encode */
-    dst = h2o_http2_encode32u(dst, stream_id);
-    dst = encode_method(header_table, dst, req->input.method);
-    dst = encode_scheme(header_table, dst, req->input.scheme);
+    *dst++ = (uint8_t)(stream_id << 24);
+    *dst++ = (uint8_t)(stream_id << 16);
+    *dst++ = (uint8_t)(stream_id << 8);
+    *dst++ = (uint8_t)stream_id;
+    dst = encode_header(header_table, dst, &H2O_TOKEN_METHOD->buf, &req->input.method);
+    dst = encode_header(header_table, dst, &H2O_TOKEN_SCHEME->buf, &req->input.scheme->name);
     dst = encode_header(header_table, dst, &H2O_TOKEN_AUTHORITY->buf, &req->input.authority);
-    dst = encode_path(header_table, dst, req->input.path);
-    size_t i;
-    for (i = 0; i != req->headers.size; ++i) {
-        const h2o_header_t *header = req->headers.entries + i;
-        if (header->name == &H2O_TOKEN_ACCEPT_ENCODING->buf &&
-            h2o_memis(header->value.base, header->value.len, H2O_STRLIT("gzip, deflate"))) {
-            *dst++ = 0x90;
-        } else {
-            dst = encode_header(header_table, dst, header->name, &header->value);
-        }
-    }
+    dst = encode_header(header_table, dst, &H2O_TOKEN_PATH->buf, &req->input.path);
+    dst = flatten_headers(dst, header_table, req->headers.entries, req->headers.size);
     (*buf)->size = (char *)dst - (*buf)->bytes;
 
     /* setup the frame headers */
@@ -765,35 +701,28 @@ void h2o_hpack_flatten_request(h2o_buffer_t **buf, h2o_hpack_header_table_t *hea
 }
 
 void h2o_hpack_flatten_response(h2o_buffer_t **buf, h2o_hpack_header_table_t *header_table, uint32_t stream_id,
-                                size_t max_frame_size, h2o_res_t *res, h2o_timestamp_t *ts, const h2o_iovec_t *server_name,
-                                size_t content_length)
+                                size_t max_frame_size, h2o_res_t *res, h2o_timestamp_t *ts, const h2o_iovec_t  *server_name)
 {
-    size_t capacity = calc_headers_capacity(res->headers.entries, res->headers.size);
+    size_t capacity = flatten_headers_calc_capacity(res->headers.entries, res->headers.size);
     capacity += H2O_HTTP2_FRAME_HEADER_SIZE; /* for the first header */
     capacity += STATUS_HEADER_MAX_SIZE;      /* for :status: */
 #ifndef H2O_UNITTEST
     capacity += 2 + H2O_TIMESTR_RFC1123_LEN; /* for Date: */
     capacity += 5 + server_name->len;        /* for Server: */
 #endif
-    if (content_length != SIZE_MAX)
-        capacity += CONTENT_LENGTH_HEADER_MAX_SIZE; /* for content-length: UINT64_MAX (with huffman compression applied) */
 
     size_t start_at = (*buf)->size;
-    uint8_t *dst = (void *)h2o_buffer_reserve(buf, capacity).base + H2O_HTTP2_FRAME_HEADER_SIZE; /* skip frame header */
-
+    //uint8_t *dst = (void *)h2o_buffer_reserve(buf, capacity).base + H2O_HTTP2_FRAME_HEADER_SIZE; /* skip frame header */
+	uint8_t *dst = (uint8_t *)h2o_buffer_reserve(buf, capacity).base + H2O_HTTP2_FRAME_HEADER_SIZE; /* skip frame header */
     /* encode */
     dst = encode_status(dst, res->status);
 #ifndef H2O_UNITTEST
     /* TODO keep some kind of reference to the indexed headers of Server and Date, and reuse them */
     dst = encode_header(header_table, dst, &H2O_TOKEN_SERVER->buf, server_name);
-    h2o_iovec_t date_value = {ts->str->rfc1123, H2O_TIMESTR_RFC1123_LEN};
+    h2o_iovec_t  date_value = {ts->str->rfc1123, H2O_TIMESTR_RFC1123_LEN};
     dst = encode_header(header_table, dst, &H2O_TOKEN_DATE->buf, &date_value);
 #endif
-    size_t i;
-    for (i = 0; i != res->headers.size; ++i)
-        dst = encode_header(header_table, dst, res->headers.entries[i].name, &res->headers.entries[i].value);
-    if (content_length != SIZE_MAX)
-        dst = encode_content_length(dst, content_length);
+    dst = flatten_headers(dst, header_table, res->headers.entries, res->headers.size);
     (*buf)->size = (char *)dst - (*buf)->bytes;
 
     /* setup the frame headers */
