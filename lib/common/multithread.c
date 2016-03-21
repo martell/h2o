@@ -32,7 +32,11 @@ struct st_h2o_multithread_queue_t {
         h2o_socket_t *read;
     } async;
 #endif
+#ifdef _WIN32
     uv_mutex_t mutex;
+#else
+	pthread_mutex_t mutex;
+#endif
     struct {
         h2o_linklist_t active;
         h2o_linklist_t inactive;
@@ -41,8 +45,11 @@ struct st_h2o_multithread_queue_t {
 
 static void queue_cb(h2o_multithread_queue_t *queue)
 {
+#ifdef _WIN32
     uv_mutex_lock(&queue->mutex);
-
+#else
+	pthread_mutex_lock(&queue->mutex);
+#endif
     while (!h2o_linklist_is_empty(&queue->receivers.active)) {
         h2o_multithread_receiver_t *receiver =
             H2O_STRUCT_FROM_MEMBER(h2o_multithread_receiver_t, _link, queue->receivers.active.next);

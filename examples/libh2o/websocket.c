@@ -20,10 +20,12 @@
  * IN THE SOFTWARE.
  */
 #include <stdio.h>
-////#include <stdlib.h>
+#ifndef _WIN32
+#include <stdlib.h>
+#include <unistd.h>
+#endif
 #include <string.h>
 #include <sys/stat.h>
-//#include <unistd.h>
 #include <uv.h>
 #include "h2o.h"
 #include "h2o/websocket.h"
